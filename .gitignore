@@ -1,0 +1,6 @@
+.playwright-mcp
+dist
+node_modules
+package-lock.json
+.env*
+.claude

@@ -1,0 +1,243 @@
+{
+  "generated": "2026-06-07",
+  "version": 2,
+  "game": "Theater of War",
+  "scale": "1 hex tile = 1 Blender unit flat-to-flat",
+  "shading": "flat",
+  "format": "GLB",
+  "models": [
+    {
+      "filename": "hex_plains.glb",
+      "category": "terrain",
+      "polys": 80,
+      "materials": [
+        "plains_grass (#8DB87A)",
+        "plains_dirt (#A08050)"
+      ],
+      "description": "Hex plains with beveled top edge, grass/dirt two-tone"
+    },
+    {
+      "filename": "hex_forest.glb",
+      "category": "terrain",
+      "polys": 113,
+      "materials": [
+        "forest_ground",
+        "forest_trunk (#5C3D1E)",
+        "canopy x2"
+      ],
+      "description": "5 trees each with trunk, lower + upper cone canopy"
+    },
+    {
+      "filename": "hex_mountain.glb",
+      "category": "terrain",
+      "polys": 102,
+      "materials": [
+        "mtn_ground",
+        "mtn_rock",
+        "mtn_stone",
+        "mtn_snow"
+      ],
+      "description": "2 rocky peaks with 3-tone rock coloring + snow caps + boulders"
+    },
+    {
+      "filename": "hex_water.glb",
+      "category": "terrain",
+      "polys": 16,
+      "materials": [
+        "water_deep",
+        "water_surface (alpha)",
+        "water_side",
+        "foam"
+      ],
+      "description": "Wave-displaced top, 4-material deep/surface/side/foam"
+    },
+    {
+      "filename": "building_city.glb",
+      "category": "building",
+      "polys": 97,
+      "materials": [
+        "city_wall (#C8C8C8)",
+        "city_roof (#8A9AAA)",
+        "city_window"
+      ],
+      "description": "3 buildings with windowed facades, roof caps, antenna"
+    },
+    {
+      "filename": "building_factory.glb",
+      "category": "building",
+      "polys": 62,
+      "materials": [
+        "factory_body (#606060)",
+        "factory_roof",
+        "stack",
+        "pipe"
+      ],
+      "description": "Wide body, roof vent, smokestack + puff cap, side pipe, windows"
+    },
+    {
+      "filename": "building_barracks.glb",
+      "category": "building",
+      "polys": 68,
+      "materials": [
+        "barracks_wall (#6B7C5A)",
+        "barracks_roof",
+        "flag (#CC3333)"
+      ],
+      "description": "Main building + wing, door, brass flagpole + red flag, sandbags"
+    },
+    {
+      "filename": "building_warehouse.glb",
+      "category": "building",
+      "polys": 36,
+      "materials": [
+        "wh_wall (#C4A97A)",
+        "wh_roof (#9A7A50)",
+        "wh_door"
+      ],
+      "description": "Wide body, ridge roof, loading bay door, metal trim strips"
+    },
+    {
+      "filename": "building_airport.glb",
+      "category": "building",
+      "polys": 128,
+      "materials": [
+        "apt_concrete",
+        "apt_runway",
+        "apt_glass",
+        "apt_beacon"
+      ],
+      "description": "Control tower + glass ring + overhang + terminal + runway dashes"
+    },
+    {
+      "filename": "building_harbor.glb",
+      "category": "building",
+      "polys": 76,
+      "materials": [
+        "harbor_wood",
+        "harbor_plank",
+        "harbor_crane",
+        "harbor_rope"
+      ],
+      "description": "Dock with plank detail, crane + diagonal brace, bollards, chain"
+    },
+    {
+      "filename": "building_turret.glb",
+      "category": "building",
+      "polys": 82,
+      "materials": [
+        "turret_dark (#3A3A3A)",
+        "turret_body",
+        "barrel",
+        "stripe"
+      ],
+      "description": "Armoured base + warning stripe + hex turret + mantlet + twin barrels"
+    },
+    {
+      "filename": "unit_infantry.glb",
+      "category": "unit",
+      "polys": 115,
+      "materials": [
+        "inf_uniform (#5A6B3A)",
+        "inf_boot",
+        "inf_skin",
+        "inf_helmet"
+      ],
+      "description": "Full figure: boots, legs, torso, arms, belt, head, helmet+brim, rifle"
+    },
+    {
+      "filename": "unit_tank.glb",
+      "category": "unit",
+      "polys": 200,
+      "materials": [
+        "tank_hull (#4A5C2A)",
+        "tank_turret",
+        "tank_track",
+        "metal"
+      ],
+      "description": "Beveled hull + glacis plate, hex turret, road wheels, cannon+muzzle"
+    },
+    {
+      "filename": "unit_artillery.glb",
+      "category": "unit",
+      "polys": 135,
+      "materials": [
+        "art_olive (#3D4F25)",
+        "art_rocket",
+        "art_warhead",
+        "wheel"
+      ],
+      "description": "Cab + truck bed + 45\u00b0 launch rail + 3 rockets w/ red warheads, 6 wheels"
+    },
+    {
+      "filename": "unit_fighter.glb",
+      "category": "unit",
+      "polys": 81,
+      "materials": [
+        "fig_grey (#5A7A9A)",
+        "fig_dark",
+        "fig_cockpit",
+        "exhaust"
+      ],
+      "description": "8-sided tapered fuselage, solid delta wings, tail fins, cockpit, intakes"
+    },
+    {
+      "filename": "unit_bomber.glb",
+      "category": "unit",
+      "polys": 135,
+      "materials": [
+        "bomb_dark (#484848)",
+        "bomb_glass",
+        "bomb_engine",
+        "beacon"
+      ],
+      "description": "Heavy fuselage + bomb bay, swept wings, nacelles+intakes, tail beacon"
+    },
+    {
+      "filename": "unit_helicopter.glb",
+      "category": "unit",
+      "polys": 190,
+      "materials": [
+        "heli_green (#4A6040)",
+        "heli_glass",
+        "heli_rotor",
+        "skid"
+      ],
+      "description": "Bulbous body + glass cockpit, tail boom, 4-blade rotor, skid landing gear"
+    },
+    {
+      "filename": "unit_warship.glb",
+      "category": "unit",
+      "polys": 140,
+      "materials": [
+        "ship_hull (#4A5060)",
+        "ship_super",
+        "ship_gun",
+        "ship_radar"
+      ],
+      "description": "Tapered hull, 3-tier superstructure, funnel, radar mast, 2 gun turrets"
+    },
+    {
+      "filename": "unit_submarine.glb",
+      "category": "unit",
+      "polys": 124,
+      "materials": [
+        "sub_hull (#2A3A4A)",
+        "sub_conn",
+        "sub_prop",
+        "sub_light"
+      ],
+      "description": "10-sided hull, tapered bow/stern, sail+periscope, hydroplanes, 3-blade prop"
+    },
+    {
+      "filename": "unit_nuke.glb",
+      "category": "unit",
+      "polys": 95,
+      "materials": [
+        "nuke_white (#F0F0F0)",
+        "nuke_stripe (#CC2222)",
+        "nuke_dark"
+      ],
+      "description": "3-section body, dark nose, dual red stripes, glow nozzle, 3 large swept fins"
+    }
+  ]
+}

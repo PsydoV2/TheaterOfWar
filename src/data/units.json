@@ -1,0 +1,178 @@
+[
+  {
+    "id": "infantry_basic",
+    "name": "Standard Infantry",
+    "requiredBuilding": "barracks",
+    "requiredBuildingLevel": 1,
+    "maxHp": 100,
+    "cost": { "credits": 50, "productionNeeded": 100 },
+    "movement": { "type": "land", "range": 2 },
+    "combat": {
+      "damageVsLand": 15,
+      "damageVsAir": 2,
+      "damageVsSea": 0,
+      "range": 1
+    },
+    "specialTraits": []
+  },
+  {
+    "id": "infantry_elite",
+    "name": "Elite Infantry",
+    "requiredBuilding": "barracks",
+    "requiredBuildingLevel": 2,
+    "maxHp": 120,
+    "cost": { "credits": 100, "productionNeeded": 200 },
+    "movement": { "type": "land", "range": 2 },
+    "combat": {
+      "damageVsLand": 25,
+      "damageVsAir": 5,
+      "damageVsSea": 0,
+      "range": 1
+    },
+    "specialTraits": ["anti_armor"]
+  },
+  {
+    "id": "tank_medium",
+    "name": "Medium Tank",
+    "requiredBuilding": "factory",
+    "requiredBuildingLevel": 2,
+    "maxHp": 200,
+    "cost": { "credits": 200, "productionNeeded": 400 },
+    "movement": { "type": "land", "range": 3 },
+    "combat": {
+      "damageVsLand": 45,
+      "damageVsAir": 0,
+      "damageVsSea": 5,
+      "range": 1
+    },
+    "specialTraits": ["armored"]
+  },
+  {
+    "id": "tank_heavy",
+    "name": "Heavy Tank",
+    "requiredBuilding": "factory",
+    "requiredBuildingLevel": 3,
+    "maxHp": 350,
+    "cost": { "credits": 400, "productionNeeded": 800 },
+    "movement": { "type": "land", "range": 2 },
+    "combat": {
+      "damageVsLand": 70,
+      "damageVsAir": 0,
+      "damageVsSea": 10,
+      "range": 1
+    },
+    "specialTraits": ["armored", "heavy_armor"]
+  },
+  {
+    "id": "artillery",
+    "name": "Artillery",
+    "requiredBuilding": "factory",
+    "requiredBuildingLevel": 1,
+    "maxHp": 80,
+    "cost": { "credits": 150, "productionNeeded": 300 },
+    "movement": { "type": "land", "range": 1 },
+    "combat": {
+      "damageVsLand": 50,
+      "damageVsAir": 0,
+      "damageVsSea": 10,
+      "range": 2
+    },
+    "specialTraits": ["indirect_fire"]
+  },
+  {
+    "id": "apc",
+    "name": "Armored Personnel Carrier",
+    "requiredBuilding": "factory",
+    "requiredBuildingLevel": 1,
+    "maxHp": 120,
+    "cost": { "credits": 120, "productionNeeded": 250 },
+    "movement": { "type": "land", "range": 4 },
+    "combat": {
+      "damageVsLand": 10,
+      "damageVsAir": 5,
+      "damageVsSea": 0,
+      "range": 1
+    },
+    "specialTraits": ["transport"]
+  },
+  {
+    "id": "fighter_jet",
+    "name": "Fighter Jet",
+    "requiredBuilding": "airport",
+    "requiredBuildingLevel": 1,
+    "maxHp": 100,
+    "cost": { "credits": 300, "productionNeeded": 600 },
+    "movement": { "type": "air", "range": 6 },
+    "combat": {
+      "damageVsLand": 10,
+      "damageVsAir": 60,
+      "damageVsSea": 15,
+      "range": 1
+    },
+    "specialTraits": []
+  },
+  {
+    "id": "bomber",
+    "name": "Strategic Bomber",
+    "requiredBuilding": "airport",
+    "requiredBuildingLevel": 2,
+    "maxHp": 120,
+    "cost": { "credits": 500, "productionNeeded": 1000 },
+    "movement": { "type": "air", "range": 5 },
+    "combat": {
+      "damageVsLand": 60,
+      "damageVsAir": 10,
+      "damageVsSea": 40,
+      "range": 1
+    },
+    "specialTraits": ["aoe_blast_radius_1"]
+  },
+  {
+    "id": "destroyer",
+    "name": "Destroyer",
+    "requiredBuilding": "harbor",
+    "requiredBuildingLevel": 1,
+    "maxHp": 200,
+    "cost": { "credits": 400, "productionNeeded": 800 },
+    "movement": { "type": "water", "range": 4 },
+    "combat": {
+      "damageVsLand": 20,
+      "damageVsAir": 30,
+      "damageVsSea": 40,
+      "range": 2
+    },
+    "specialTraits": []
+  },
+  {
+    "id": "submarine",
+    "name": "Attack Submarine",
+    "requiredBuilding": "harbor",
+    "requiredBuildingLevel": 2,
+    "maxHp": 150,
+    "cost": { "credits": 600, "productionNeeded": 1200 },
+    "movement": { "type": "water", "range": 5 },
+    "combat": {
+      "damageVsLand": 0,
+      "damageVsAir": 0,
+      "damageVsSea": 80,
+      "range": 2
+    },
+    "specialTraits": ["stealth"]
+  },
+  {
+    "id": "ballistic_nuke",
+    "name": "Tactical Nuclear Missile",
+    "requiredBuilding": "warehouse",
+    "requiredBuildingLevel": 3,
+    "maxHp": 1,
+    "cost": { "credits": 1000, "productionNeeded": 2500 },
+    "movement": { "type": "ballistic", "range": 15 },
+    "combat": {
+      "damageVsLand": 9999,
+      "damageVsAir": 9999,
+      "damageVsSea": 9999,
+      "range": 1
+    },
+    "specialTraits": ["aoe_blast_radius_1", "consume_on_attack"]
+  }
+]

@@ -37,8 +37,9 @@ export class CityPanel {
     this.container = el("div",
       "fixed top-0 right-0 h-full w-80 bg-gray-950 border-l border-gray-700 " +
       "shadow-2xl transition-transform duration-300 translate-x-full z-50 " +
-      "flex flex-col pointer-events-auto overflow-hidden"
+      "flex flex-col overflow-hidden"
     );
+    this.container.style.pointerEvents = "none";
     document.body.appendChild(this.container);
 
     // Scrollable body
@@ -62,11 +63,13 @@ export class CityPanel {
     this.currentCityId = cityId;
     this.render();
     this.container.classList.remove("translate-x-full");
+    this.container.style.pointerEvents = "auto";
   }
 
   close(): void {
     this.currentCityId = null;
     this.container.classList.add("translate-x-full");
+    this.container.style.pointerEvents = "none";
   }
 
   isOpen(): boolean {

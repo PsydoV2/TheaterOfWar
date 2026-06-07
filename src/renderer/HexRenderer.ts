@@ -1,65 +1,101 @@
 import * as THREE from "three";
 import type { IGameState, HexCell, Owner } from "../engine/types";
 import {
-  HEX_SIZE, HEX_HEIGHT, HEX_SEGMENTS, HEX_GAP,
-  hexToWorld, TERRAIN_CONFIG, OWNER_COLORS,
+  HEX_SIZE,
+  HEX_HEIGHT,
+  HEX_SEGMENTS,
+  HEX_GAP,
+  hexToWorld,
+  TERRAIN_CONFIG,
+  OWNER_COLORS,
 } from "./constants";
 import type { ModelLoader } from "./ModelLoader";
 
 // Scale for terrain hex tile GLB: horizontal footprint matches (HEX_SIZE - HEX_GAP) diameter
-const TILE_SCALE  = (HEX_SIZE - HEX_GAP) * 2;
+const TILE_SCALE = (HEX_SIZE - HEX_GAP) * 2;
 // Scale for city building model
-const CITY_SCALE  = HEX_SIZE * 0.55;
+const CITY_SCALE = HEX_SIZE * 0.55;
 
 const MODEL_HEX: Record<string, string> = {
-  plains:   "/models/hex_plains.glb",
-  forest:   "/models/hex_forest.glb",
+  plains: "/models/hex_plains.glb",
+  forest: "/models/hex_forest.glb",
   mountain: "/models/hex_mountain.glb",
-  water:    "/models/hex_water.glb",
+  water: "/models/hex_water.glb",
+};
+
+const MODEL_CITY: Record<Owner, string> = {
+  player: "/models/building_city_friendly.glb",
+  enemy: "/models/building_city_enemy.glb",
+  neutral: "/models/building_city_neutral.glb",
 };
 
 // ─── Shared read-only geometries (used for procedural fallbacks + overlays) ───
 
 const GEO_HEX_HIT = new THREE.CylinderGeometry(
-  HEX_SIZE - HEX_GAP, HEX_SIZE - HEX_GAP, HEX_HEIGHT, HEX_SEGMENTS
+  HEX_SIZE - HEX_GAP,
+  HEX_SIZE - HEX_GAP,
+  HEX_HEIGHT,
+  HEX_SEGMENTS,
 );
 const GEO_HEX_VISUAL = new THREE.CylinderGeometry(
-  HEX_SIZE - HEX_GAP, HEX_SIZE - HEX_GAP, HEX_HEIGHT, HEX_SEGMENTS
+  HEX_SIZE - HEX_GAP,
+  HEX_SIZE - HEX_GAP,
+  HEX_HEIGHT,
+  HEX_SEGMENTS,
 );
 const GEO_PYRAMID = new THREE.ConeGeometry(HEX_SIZE * 0.52, HEX_SIZE * 0.95, 4);
-const GEO_TREE    = new THREE.ConeGeometry(HEX_SIZE * 0.18, HEX_SIZE * 0.48, 5);
-const GEO_CITY    = new THREE.BoxGeometry(0.38, 0.38, 0.38);
-const GEO_HOVER   = new THREE.CylinderGeometry(
+const GEO_TREE = new THREE.ConeGeometry(HEX_SIZE * 0.18, HEX_SIZE * 0.48, 5);
+const GEO_CITY = new THREE.BoxGeometry(0.38, 0.38, 0.38);
+const GEO_HOVER = new THREE.CylinderGeometry(
   HEX_SIZE - HEX_GAP + 0.06,
   HEX_SIZE - HEX_GAP + 0.06,
-  0.04, HEX_SEGMENTS
+  0.04,
+  HEX_SEGMENTS,
 );
 
-// Pointy-top rotation: vertices point along ±Z
-const HEX_ROT_Y = Math.PI / 6;
+// Rotation to align GLB hex tile flat sides with neighbour directions
+const HEX_ROT_Y = Math.PI / 3;
 
 const MAT_INVISIBLE = new THREE.MeshBasicMaterial({ visible: false });
-const MAT_HOVER     = new THREE.MeshBasicMaterial({ color: 0xffdd44, transparent: true, opacity: 0.42 });
-const MAT_RANGE     = new THREE.MeshBasicMaterial({ color: 0x22ddcc, transparent: true, opacity: 0.30 });
-const MAT_RANGE_ENEMY = new THREE.MeshBasicMaterial({ color: 0xff6622, transparent: true, opacity: 0.28 });
+const MAT_HOVER = new THREE.MeshBasicMaterial({
+  color: 0xffdd44,
+  transparent: true,
+  opacity: 0.42,
+});
+const MAT_RANGE = new THREE.MeshBasicMaterial({
+  color: 0x22ddcc,
+  transparent: true,
+  opacity: 0.3,
+});
+const MAT_RANGE_ENEMY = new THREE.MeshBasicMaterial({
+  color: 0xff6622,
+  transparent: true,
+  opacity: 0.28,
+});
 
 // Tree offsets — deterministic
 const TREE_OFFSETS = [
-  { dx:  0.00, dz:  0.00 },
-  { dx:  0.38, dz:  0.30 },
-  { dx: -0.30, dz:  0.38 },
+  { dx: 0.0, dz: 0.0 },
+  { dx: 0.38, dz: 0.3 },
+  { dx: -0.3, dz: 0.38 },
 ];
 
 // ─── HexRenderer ─────────────────────────────────────────────────────────────
 
+interface CityEntry {
+  model: THREE.Object3D;
+  ring: THREE.Mesh;
+  pos: THREE.Vector3; // world position of the city surface center
+}
+
 export class HexRenderer {
-  private readonly baseMeshes    = new Map<string, THREE.Mesh>();     // invisible hit-test meshes
-  private readonly meshToHexId   = new Map<THREE.Mesh, string>();
-  private readonly cityMarkers   = new Map<string, THREE.Object3D>(); // visual only
-  private readonly cityRings     = new Map<string, THREE.Mesh>();     // colored ownership rings
+  private readonly baseMeshes = new Map<string, THREE.Mesh>(); // invisible hit-test meshes
+  private readonly meshToHexId = new Map<THREE.Mesh, string>();
+  private readonly cities = new Map<string, CityEntry>(); // hexId → city visual
   private readonly hoverMesh: THREE.Mesh;
   private readonly rangeOverlays: THREE.Mesh[] = [];
   private readonly scene: THREE.Scene;
+  private models!: ModelLoader;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -72,6 +108,7 @@ export class HexRenderer {
   }
 
   buildGrid(state: IGameState, models: ModelLoader): void {
+    this.models = models;
     for (const cell of state.hexMap.values()) {
       this.buildCell(cell, state, models);
     }
@@ -79,10 +116,14 @@ export class HexRenderer {
 
   // ─── Cell construction ────────────────────────────────────────────────────
 
-  private buildCell(cell: HexCell, state: IGameState, models: ModelLoader): void {
-    const cfg       = TERRAIN_CONFIG[cell.terrain];
-    const { x, z }  = hexToWorld(cell.q, cell.r);
-    const y         = cfg.elevation;
+  private buildCell(
+    cell: HexCell,
+    state: IGameState,
+    models: ModelLoader,
+  ): void {
+    const cfg = TERRAIN_CONFIG[cell.terrain];
+    const { x, z } = hexToWorld(cell.q, cell.r);
+    const y = cfg.elevation;
 
     // Invisible hit-test mesh (raycasting only)
     const hitMesh = new THREE.Mesh(GEO_HEX_HIT, MAT_INVISIBLE);
@@ -94,7 +135,9 @@ export class HexRenderer {
 
     // Visual tile: GLB if available, otherwise procedural
     const modelPath = MODEL_HEX[cell.terrain];
-    const glb = models.has(modelPath) ? models.clone(modelPath, TILE_SCALE) : null;
+    const glb = models.has(modelPath)
+      ? models.clone(modelPath, TILE_SCALE)
+      : null;
 
     if (glb) {
       glb.position.set(x, y, z);
@@ -111,9 +154,14 @@ export class HexRenderer {
     }
   }
 
-  private buildProceduralCell(cell: HexCell, x: number, y: number, z: number): void {
+  private buildProceduralCell(
+    cell: HexCell,
+    x: number,
+    y: number,
+    z: number,
+  ): void {
     const cfg = TERRAIN_CONFIG[cell.terrain];
-    const mat  = new THREE.MeshLambertMaterial({ color: cfg.baseColor });
+    const mat = new THREE.MeshLambertMaterial({ color: cfg.baseColor });
     const mesh = new THREE.Mesh(GEO_HEX_VISUAL, mat);
     mesh.position.set(x, y + HEX_HEIGHT / 2, z);
     mesh.rotation.y = HEX_ROT_Y;
@@ -122,13 +170,17 @@ export class HexRenderer {
 
     const surfY = y + HEX_HEIGHT;
     switch (cell.terrain) {
-      case "mountain": this.addMountain(x, surfY, z); break;
-      case "forest":   this.addForest(x, surfY, z);   break;
+      case "mountain":
+        this.addMountain(x, surfY, z);
+        break;
+      case "forest":
+        this.addForest(x, surfY, z);
+        break;
     }
   }
 
   private addMountain(x: number, baseY: number, z: number): void {
-    const mat  = new THREE.MeshLambertMaterial({ color: 0xa09890 });
+    const mat = new THREE.MeshLambertMaterial({ color: 0xa09890 });
     const peak = new THREE.Mesh(GEO_PYRAMID, mat);
     peak.position.set(x, baseY + HEX_SIZE * 0.475, z);
     peak.rotation.y = Math.PI / 4;
@@ -146,50 +198,79 @@ export class HexRenderer {
     }
   }
 
-  private addCityMarker(hId: string, x: number, y: number, z: number, owner: Owner, models: ModelLoader): void {
+  private addCityMarker(
+    hId: string,
+    x: number,
+    y: number,
+    z: number,
+    owner: Owner,
+    models: ModelLoader,
+  ): void {
     const surfY = y + HEX_HEIGHT;
+    const pos = new THREE.Vector3(x, surfY, z);
 
-    const glb = models.has("/models/building_city.glb")
-      ? models.clone("/models/building_city.glb", CITY_SCALE)
-      : null;
+    const model = this.spawnCityModel(owner, pos, models);
 
-    if (glb) {
-      glb.position.set(x, surfY, z);
-      this.scene.add(glb);
-      this.cityMarkers.set(hId, glb);
-    } else {
-      const mat  = new THREE.MeshPhongMaterial({ color: OWNER_COLORS[owner], shininess: 70 });
-      const cube = new THREE.Mesh(GEO_CITY, mat);
-      cube.position.set(x, surfY + 0.19, z);
-      cube.castShadow = true;
-      this.scene.add(cube);
-      this.cityMarkers.set(hId, cube);
-    }
-
-    // Ownership ring beneath city marker
+    // Ownership ring beneath city model (also acts as fallback visibility)
     const ringGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.04, HEX_SEGMENTS);
     const ringMat = new THREE.MeshBasicMaterial({ color: OWNER_COLORS[owner] });
-    const ring    = new THREE.Mesh(ringGeo, ringMat);
+    const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.position.set(x, surfY + 0.01, z);
     ring.rotation.y = HEX_ROT_Y;
     ring.renderOrder = 1;
     this.scene.add(ring);
-    this.cityRings.set(hId, ring);
+
+    this.cities.set(hId, { model, ring, pos });
   }
 
-  /** Updates the ownership ring color when a city is captured. */
+  private spawnCityModel(
+    owner: Owner,
+    pos: THREE.Vector3,
+    models: ModelLoader,
+  ): THREE.Object3D {
+    const path = MODEL_CITY[owner];
+    const glb = models.has(path) ? models.clone(path, CITY_SCALE) : null;
+
+    if (glb) {
+      glb.position.copy(pos);
+      this.scene.add(glb);
+      return glb;
+    }
+
+    // Procedural fallback
+    const mat = new THREE.MeshPhongMaterial({
+      color: OWNER_COLORS[owner],
+      shininess: 70,
+    });
+    const cube = new THREE.Mesh(GEO_CITY, mat);
+    cube.position.set(pos.x, pos.y + 0.19, pos.z);
+    cube.castShadow = true;
+    this.scene.add(cube);
+    return cube;
+  }
+
+  /** Swaps the city GLB model and ownership ring color when a city is captured. */
   updateCityMarker(hexId: string, owner: Owner): void {
-    const ring = this.cityRings.get(hexId);
-    if (ring) (ring.material as THREE.MeshBasicMaterial).color.setHex(OWNER_COLORS[owner]);
+    const entry = this.cities.get(hexId);
+    if (!entry) return;
+
+    // Remove old model, place the new one
+    this.scene.remove(entry.model);
+    entry.model = this.spawnCityModel(owner, entry.pos, this.models);
+
+    // Update ring color
+    (entry.ring.material as THREE.MeshBasicMaterial).color.setHex(
+      OWNER_COLORS[owner],
+    );
   }
 
   syncCityOwners(state: IGameState): void {
-    for (const [hId, ring] of this.cityRings) {
+    for (const hId of this.cities.keys()) {
       const cell = state.hexMap.get(hId);
       if (!cell?.cityId) continue;
       const city = state.cities.get(cell.cityId);
       if (!city) continue;
-      (ring.material as THREE.MeshBasicMaterial).color.setHex(OWNER_COLORS[city.owner]);
+      this.updateCityMarker(hId, city.owner);
     }
   }
 
@@ -197,7 +278,7 @@ export class HexRenderer {
 
   setRangeHighlight(moveIds: string[], attackIds: string[] = []): void {
     this.clearRangeHighlight();
-    for (const id of moveIds)   this.addRangeOverlay(id, MAT_RANGE);
+    for (const id of moveIds) this.addRangeOverlay(id, MAT_RANGE);
     for (const id of attackIds) this.addRangeOverlay(id, MAT_RANGE_ENEMY);
   }
 
@@ -205,7 +286,11 @@ export class HexRenderer {
     const base = this.baseMeshes.get(id);
     if (!base) return;
     const overlay = new THREE.Mesh(GEO_HOVER, mat);
-    overlay.position.set(base.position.x, base.position.y + HEX_HEIGHT * 0.55, base.position.z);
+    overlay.position.set(
+      base.position.x,
+      base.position.y + HEX_HEIGHT * 0.55,
+      base.position.z,
+    );
     overlay.rotation.y = HEX_ROT_Y;
     overlay.renderOrder = 1;
     this.scene.add(overlay);

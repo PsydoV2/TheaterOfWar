@@ -21,7 +21,9 @@ const MODEL_PATHS = [
   "/models/hex_forest.glb",
   "/models/hex_mountain.glb",
   "/models/hex_water.glb",
-  "/models/building_city.glb",
+  "/models/building_city_friendly.glb",
+  "/models/building_city_enemy.glb",
+  "/models/building_city_neutral.glb",
   "/models/unit_infantry.glb",
   "/models/unit_tank.glb",
   "/models/unit_artillery.glb",
@@ -31,6 +33,8 @@ const MODEL_PATHS = [
   "/models/unit_submarine.glb",
   "/models/unit_nuke.glb",
 ];
+
+void (async () => {
 
 // Loading screen
 const loadingScreen = el("div",
@@ -557,3 +561,5 @@ updateResources();
 sceneManager.start((dt) => {
   unitRenderer.update(dt);
 });
+
+})(); // end async IIFE

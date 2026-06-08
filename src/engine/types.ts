@@ -12,7 +12,8 @@ export type BuildingKey =
   | "warehouse"
   | "airport"
   | "harbor"
-  | "turret";
+  | "turret"
+  | "market";
 
 // ─── Map ─────────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,7 @@ export interface BuildingLevels {
   airportLevel: number;   // 0–1 (binary presence)
   harborLevel: number;    // 0–1 (binary presence)
   turretLevel: number;    // 0–3
+  marketLevel: number;    // 0–3, +25$/turn per level
 }
 
 export interface ProductionQueueItem {

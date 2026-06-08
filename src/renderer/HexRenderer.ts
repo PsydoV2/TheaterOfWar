@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { IGameState, HexCell, Owner } from "../engine/types";
+import type { IGameState, HexCell, Owner, BuildingKey, BuildingLevels } from "../engine/types";
 import {
   HEX_SIZE,
   HEX_HEIGHT,
@@ -15,6 +15,8 @@ import type { ModelLoader } from "./ModelLoader";
 const TILE_SCALE = (HEX_SIZE - HEX_GAP) * 2;
 // Scale for city building model
 const CITY_SCALE = HEX_SIZE * 0.55;
+// Scale for individual building GLBs placed around the hex edge
+const BUILDING_SCALE = HEX_SIZE * 0.42;
 
 const MODEL_HEX: Record<string, string> = {
   plains: "/models/hex_plains.glb",
@@ -56,6 +58,31 @@ const GEO_HOVER = new THREE.CylinderGeometry(
 // Rotation to align GLB hex tile flat sides with neighbour directions
 const HEX_ROT_Y = Math.PI / 3;
 
+// ─── Building marker definitions ──────────────────────────────────────────────
+// Buildings placed at the hex edge (~0.82 world units from center, 6 directions + S).
+// Hex inradius = HEX_SIZE * sqrt(3)/2 ≈ 1.04, so 0.82 sits just inside the edge.
+
+interface BuildingMarkerDef {
+  model: string | null; // GLB path; null = procedural box fallback
+  color: number;        // used only when model is null
+  ox: number;           // x offset from hex center
+  oz: number;           // z offset
+}
+
+const BUILDING_MARKER: Record<BuildingKey, BuildingMarkerDef> = {
+  factory:   { model: "/models/building_factory.glb",   color: 0x888888, ox:  0.82, oz:  0.00 },
+  barracks:  { model: "/models/building_barracks.glb",  color: 0x556633, ox:  0.41, oz:  0.71 },
+  warehouse: { model: "/models/building_warehouse.glb", color: 0xaa8855, ox: -0.41, oz:  0.71 },
+  airport:   { model: "/models/building_airport.glb",   color: 0xaaccff, ox: -0.82, oz:  0.00 },
+  harbor:    { model: "/models/building_harbor.glb",    color: 0x2255bb, ox: -0.41, oz: -0.71 },
+  turret:    { model: "/models/building_turret.glb",    color: 0x334455, ox:  0.41, oz: -0.71 },
+  market:    { model: null,                              color: 0xddaa00, ox:  0.00, oz:  0.82 },
+};
+
+const BUILDING_KEYS: BuildingKey[] = [
+  "factory", "barracks", "warehouse", "airport", "harbor", "turret", "market",
+];
+
 const MAT_INVISIBLE = new THREE.MeshBasicMaterial({ visible: false });
 const MAT_HOVER = new THREE.MeshBasicMaterial({
   color: 0xffdd44,
@@ -92,6 +119,7 @@ export class HexRenderer {
   private readonly baseMeshes = new Map<string, THREE.Mesh>(); // invisible hit-test meshes
   private readonly meshToHexId = new Map<THREE.Mesh, string>();
   private readonly cities = new Map<string, CityEntry>(); // hexId → city visual
+  private readonly buildingMarkers = new Map<string, THREE.Object3D[]>(); // hexId → markers
   private readonly hoverMesh: THREE.Mesh;
   private readonly rangeOverlays: THREE.Mesh[] = [];
   private readonly scene: THREE.Scene;
@@ -111,6 +139,10 @@ export class HexRenderer {
     this.models = models;
     for (const cell of state.hexMap.values()) {
       this.buildCell(cell, state, models);
+    }
+    // Show initial building markers for all pre-built cities
+    for (const city of state.cities.values()) {
+      this.updateCityBuildings(city.hexId, city.buildings);
     }
   }
 
@@ -282,6 +314,33 @@ export class HexRenderer {
     for (const id of attackIds) this.addRangeOverlay(id, MAT_RANGE_ENEMY);
   }
 
+  /** Highlight a movement path (brighter overlay on each step hex). */
+  private pathOverlays: THREE.Mesh[] = [];
+  private static readonly MAT_PATH = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.55,
+  });
+
+  setPathHighlight(hexIds: string[]): void {
+    this.clearPathHighlight();
+    for (const id of hexIds) {
+      const base = this.baseMeshes.get(id);
+      if (!base) continue;
+      const overlay = new THREE.Mesh(GEO_HOVER, HexRenderer.MAT_PATH);
+      overlay.position.set(base.position.x, base.position.y + HEX_HEIGHT * 0.58, base.position.z);
+      overlay.rotation.y = HEX_ROT_Y;
+      overlay.renderOrder = 2;
+      this.scene.add(overlay);
+      this.pathOverlays.push(overlay);
+    }
+  }
+
+  clearPathHighlight(): void {
+    for (const m of this.pathOverlays) this.scene.remove(m);
+    this.pathOverlays.length = 0;
+  }
+
   private addRangeOverlay(id: string, mat: THREE.MeshBasicMaterial): void {
     const base = this.baseMeshes.get(id);
     if (!base) return;
@@ -300,6 +359,57 @@ export class HexRenderer {
   clearRangeHighlight(): void {
     for (const m of this.rangeOverlays) this.scene.remove(m);
     this.rangeOverlays.length = 0;
+  }
+
+  // ─── Building markers ─────────────────────────────────────────────────────
+
+  /** Creates or replaces building markers (GLB models) for a city hex. */
+  updateCityBuildings(hexId: string, buildings: BuildingLevels): void {
+    for (const obj of this.buildingMarkers.get(hexId) ?? []) this.scene.remove(obj);
+
+    const entry = this.cities.get(hexId);
+    if (!entry) return;
+    const surfY = entry.pos.y;
+    const wx = entry.pos.x;
+    const wz = entry.pos.z;
+    const markers: THREE.Object3D[] = [];
+
+    for (const key of BUILDING_KEYS) {
+      const level = buildings[`${key}Level` as keyof BuildingLevels] as number;
+      if (level === 0) continue;
+
+      const def = BUILDING_MARKER[key];
+      const bx = wx + def.ox;
+      const bz = wz + def.oz;
+      // Rotate building to face the hex center
+      const rotY = Math.atan2(-def.ox, -def.oz);
+
+      let placed = false;
+      if (def.model && this.models.has(def.model)) {
+        const glb = this.models.clone(def.model, BUILDING_SCALE);
+        if (glb) {
+          glb.position.set(bx, surfY, bz);
+          glb.rotation.y = rotY;
+          this.scene.add(glb);
+          markers.push(glb);
+          placed = true;
+        }
+      }
+
+      // Procedural fallback (also used for market which has no GLB)
+      if (!placed) {
+        const h = 0.10 + level * 0.06;
+        const mat = new THREE.MeshPhongMaterial({ color: def.color, shininess: 40 });
+        const geo = new THREE.BoxGeometry(0.14, h, 0.14);
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.castShadow = true;
+        mesh.position.set(bx, surfY + h / 2, bz);
+        this.scene.add(mesh);
+        markers.push(mesh);
+      }
+    }
+
+    this.buildingMarkers.set(hexId, markers);
   }
 
   // ─── Raycasting interface ─────────────────────────────────────────────────

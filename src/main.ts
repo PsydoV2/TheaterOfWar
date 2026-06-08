@@ -3,7 +3,7 @@ import { GameState } from "./engine/GameState";
 import { TurnResolver } from "./engine/TurnResolver";
 import type { TurnEvent, TurnResult } from "./engine/types";
 import type { Owner } from "./engine/types";
-import { getReachable, getAttackableTargets } from "./engine/Pathfinder";
+import { getReachable, getAttackableTargets, findPath } from "./engine/Pathfinder";
 import { resolveCombatPair } from "./engine/CombatResolver";
 import type { CombatEvent } from "./engine/CombatResolver";
 import { SceneManager } from "./renderer/SceneManager";
@@ -24,6 +24,12 @@ const MODEL_PATHS = [
   "/models/building_city_friendly.glb",
   "/models/building_city_enemy.glb",
   "/models/building_city_neutral.glb",
+  "/models/building_factory.glb",
+  "/models/building_barracks.glb",
+  "/models/building_warehouse.glb",
+  "/models/building_airport.glb",
+  "/models/building_harbor.glb",
+  "/models/building_turret.glb",
   "/models/unit_infantry.glb",
   "/models/unit_tank.glb",
   "/models/unit_artillery.glb",
@@ -48,9 +54,20 @@ const modelLoader = new ModelLoader();
 await modelLoader.preload(MODEL_PATHS);
 loadingScreen.remove();
 
+// ─── Seed (URL param ?seed=N, or random) ─────────────────────────────────────
+
+const urlSeed = new URLSearchParams(location.search).get("seed");
+const seed = urlSeed !== null ? parseInt(urlSeed, 10) : Math.floor(Math.random() * 1_000_000);
+// Persist seed in URL without reloading so the map is shareable
+if (!urlSeed) {
+  const u = new URL(location.href);
+  u.searchParams.set("seed", String(seed));
+  history.replaceState(null, "", u);
+}
+
 // ─── Game State ───────────────────────────────────────────────────────────────
 
-const state    = new GameState();
+const state    = new GameState(seed);
 const resolver = new TurnResolver(state);
 
 // ─── Canvas ───────────────────────────────────────────────────────────────────
@@ -69,7 +86,11 @@ unitRenderer.syncWithState(state, modelLoader);
 
 // ─── City Panel ───────────────────────────────────────────────────────────────
 
-const cityPanel = new CityPanel(state, () => updateResources());
+const cityPanel = new CityPanel(state, (cityId) => {
+  updateResources();
+  const city = state.getCity(cityId);
+  if (city) hexRenderer.updateCityBuildings(city.hexId, city.buildings);
+});
 
 // ─── Selection State ──────────────────────────────────────────────────────────
 
@@ -102,6 +123,7 @@ function deselect(): void {
   currentReachable  = [];
   currentAttackable = [];
   hexRenderer.clearRangeHighlight();
+  hexRenderer.clearPathHighlight();
   unitRenderer.setSelected(null);
 }
 
@@ -111,6 +133,9 @@ function performAttack(attackerId: string, defenderId: string): void {
   const attacker = state.getUnit(attackerId);
   if (!attacker || attacker.hasAttacked) return;
 
+  // Charge animation plays first (async), combat resolves immediately
+  unitRenderer.playAttackAnimation(attackerId, defenderId);
+
   const evt = resolveCombatPair(attackerId, defenderId, state);
   if (!evt) return;
 
@@ -119,6 +144,10 @@ function performAttack(attackerId: string, defenderId: string): void {
 
   appendCombatLog(evt);
   unitRenderer.syncWithState(state);
+
+  // Hit-shake for survivors that took damage
+  if (!evt.aDestroyed && evt.aDamage > 0) unitRenderer.shakeUnit(attackerId);
+  if (!evt.bDestroyed && evt.bDamage > 0) unitRenderer.shakeUnit(defenderId);
 
   if (attackerSurvived) selectUnit(attackerId);
   else deselect();
@@ -137,6 +166,7 @@ const topBar = el("div",
 
 const titleBlock = el("div", "");
 titleBlock.appendChild(el("h1", "text-xl font-bold tracking-widest text-amber-400 uppercase", "Theater of War"));
+titleBlock.appendChild(el("div", "text-xs font-mono text-gray-600", `seed: ${seed}`));
 
 // Resource bar with per-turn stats
 const resourceBar = el("div", "flex gap-5 text-xs font-mono items-center");
@@ -211,7 +241,8 @@ function updateResources(): void {
 
   // Per-turn income
   const playerCities   = state.getCitiesBy("player");
-  const incomePerTurn  = playerCities.length * 30;
+  const incomePerTurn  = playerCities.length * 30
+    + playerCities.reduce((s, c) => s + c.buildings.marketLevel * 25, 0);
 
   // Per-turn production (sum of factoryLevel × 50 for each player city with a queue)
   const prodPerTurn    = playerCities.reduce((sum, c) => sum + c.buildings.factoryLevel * 50, 0);
@@ -459,6 +490,20 @@ new InputManager(
   (hexId) => {
     hexRenderer.setHovered(hexId);
     updateHoverPanel(hexId);
+
+    // Path preview: show movement path when hovering a reachable hex
+    if (selectedUnitId && hexId && currentReachable.includes(hexId)) {
+      const unit = state.getUnit(selectedUnitId);
+      const bp   = unit ? state.getBlueprint(unit.blueprintId) : undefined;
+      if (unit && bp && !state.getHexById(hexId)?.unitId) {
+        const path = findPath(unit.hexId, hexId, bp.movement.type, state);
+        hexRenderer.setPathHighlight(path ?? []);
+      } else {
+        hexRenderer.clearPathHighlight();
+      }
+    } else {
+      hexRenderer.clearPathHighlight();
+    }
   },
   (hexId) => {
     const cell = state.getHexById(hexId);
@@ -487,6 +532,19 @@ new InputManager(
     // ── Case 2: valid move destination ────────────────────────────────────────
     if (selectedUnitId && currentReachable.includes(hexId)) {
       const movedId = selectedUnitId;
+
+      // Stack/merge: destination occupied by a friendly land unit
+      if (cell.unitId) {
+        const targetUnit = state.getUnit(cell.unitId);
+        if (targetUnit && targetUnit.owner === "player") {
+          state.mergeUnits(movedId, targetUnit.instanceId);
+          deselect();
+          hexRenderer.clearRangeHighlight();
+          unitRenderer.syncWithState(state);
+          updateResources();
+          return;
+        }
+      }
 
       unitRenderer.animateTo(movedId, hexId, state);
       state.moveUnit(movedId, hexId);

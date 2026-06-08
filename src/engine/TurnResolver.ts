@@ -9,6 +9,7 @@ export type { TurnEvent, TurnResult };
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CREDITS_PER_CITY = 30;
+const MARKET_INCOME_PER_LEVEL = 25;
 const PRODUCTION_PER_FACTORY_LEVEL = 50;
 const TURRET_DAMAGE_PER_LEVEL = 15;
 
@@ -66,13 +67,18 @@ export class TurnResolver {
     const cities = this.state.getCitiesBy(owner);
     const res = this.state.resources(owner);
 
-    const gross = cities.length * CREDITS_PER_CITY;
+    const baseIncome  = cities.length * CREDITS_PER_CITY;
+    const marketBonus = cities.reduce((s, c) => s + c.buildings.marketLevel * MARKET_INCOME_PER_LEVEL, 0);
+    const gross = baseIncome + marketBonus;
+
     const before = res.credits;
     res.credits = Math.min(res.credits + gross, res.maxCredits);
     const actual = res.credits - before;
     const capped = gross - actual;
 
-    let msg = `+${actual}$ income (${cities.length} cities × ${CREDITS_PER_CITY}$) → ${res.credits}/${res.maxCredits}$`;
+    let msg = `+${actual}$ income (${cities.length}×${CREDITS_PER_CITY}$ base`;
+    if (marketBonus > 0) msg += ` + ${marketBonus}$ market`;
+    msg += `) → ${res.credits}/${res.maxCredits}$`;
     if (capped > 0) msg += ` [${capped}$ wasted — storage full]`;
     result.events.push({ category: "income", owner, message: msg });
   }

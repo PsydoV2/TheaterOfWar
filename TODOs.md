@@ -1,0 +1,9 @@
+- Boden Truppen stacken auf einem Hex (Leben werden dann kombiniert)
+- Irgendwas Bauen können was auch mehr Geld generiert
+- Besser anzeigen bis wohin man eine Truppe bewegen kann
+- Das angreifen besser gestalten
+- Sounds
+- Wenn man Fabriken, Barracks etc. baut soll man auch die entsprechenden Models dafür auf dem Hex sehen (gerne auch die benachbarten hex der stadt nutzen, die städt erweitert sich mäßig)
+- Truppen Leben überm kopf entfernen wenn die truppe tot ist
+- größere map mit mehr städten und auch nicht jede stadt am wasser
+- nur städte am wasser können hafen bauen

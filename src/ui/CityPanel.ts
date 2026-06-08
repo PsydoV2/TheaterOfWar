@@ -1,6 +1,7 @@
 import type { GameState } from "../engine/GameState";
 import type { City, BuildingKey, UnitBlueprint } from "../engine/types";
 import { el } from "./dom";
+import { getNeighbors } from "../engine/HexUtils";
 
 // ─── Building metadata (static) ───────────────────────────────────────────────
 
@@ -18,6 +19,7 @@ const BUILDING_INFO: Record<BuildingKey, BuildingInfo> = {
   airport:   { icon: "✈️",  label: "Airport",   maxLevel: 1, upgradeCosts: [200] },
   harbor:    { icon: "⚓",  label: "Harbor",    maxLevel: 1, upgradeCosts: [200] },
   turret:    { icon: "🛡️",  label: "Turret",    maxLevel: 3, upgradeCosts: [90,  180, 270] },
+  market:    { icon: "💰",  label: "Market",    maxLevel: 3, upgradeCosts: [150, 300, 450] },
 };
 
 const BUILDING_KEYS = Object.keys(BUILDING_INFO) as BuildingKey[];
@@ -31,7 +33,7 @@ export class CityPanel {
 
   constructor(
     private readonly state: GameState,
-    private readonly onUpdate: () => void,
+    private readonly onUpdate: (cityId: string) => void,
   ) {
     // Outer slide-in container
     this.container = el("div",
@@ -156,9 +158,14 @@ export class CityPanel {
       }
       rightGroup.appendChild(pips);
 
+      // Harbor: only coastal cities can build it
+      const isLocked = key === "harbor" && currentLevel === 0 && !this.isCoastal(city);
+
       // Upgrade button (only for player-owned cities)
       if (isPlayer) {
-        if (atMax) {
+        if (isLocked) {
+          rightGroup.appendChild(el("span", "text-xs text-gray-600 w-16 text-right italic", "inland"));
+        } else if (atMax) {
           rightGroup.appendChild(el("span", "text-xs text-gray-600 w-14 text-right", "MAX"));
         } else {
           const btn = el("button",
@@ -171,7 +178,7 @@ export class CityPanel {
           if (canAfford) {
             btn.addEventListener("click", () => {
               const err = this.state.upgradeBuilding(city.id, key);
-              if (!err) { this.onUpdate(); this.render(); }
+              if (!err) { this.onUpdate(city.id); this.render(); }
             });
           } else {
             btn.disabled = true;
@@ -221,7 +228,7 @@ export class CityPanel {
         const cancelBtn = el("button", "text-xs text-red-800 hover:text-red-500 transition-colors", "✕");
         cancelBtn.addEventListener("click", () => {
           this.state.cancelProduction(city.id, idx);
-          this.onUpdate();
+          this.onUpdate(city.id);
           this.render();
         });
         rightGroup.appendChild(cancelBtn);
@@ -309,7 +316,7 @@ export class CityPanel {
       if (canAfford) {
         btn.addEventListener("click", () => {
           const err = this.state.queueProduction(city.id, bp.id);
-          if (!err) { this.onUpdate(); this.render(); }
+          if (!err) { this.onUpdate(city.id); this.render(); }
         });
       } else {
         btn.disabled = true;
@@ -321,6 +328,15 @@ export class CityPanel {
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
+
+  private isCoastal(city: City): boolean {
+    const hex = this.state.getHexById(city.hexId);
+    if (!hex) return false;
+    return getNeighbors(hex.q, hex.r).some((n) => {
+      const nHex = this.state.getHex(n.q, n.r);
+      return nHex?.terrain === "water";
+    });
+  }
 
   private getAvailableBlueprints(city: City): UnitBlueprint[] {
     const result: UnitBlueprint[] = [];

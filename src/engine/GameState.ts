@@ -10,7 +10,7 @@ import type {
   BuildingKey,
 } from "./types";
 import { generateStarterMap } from "./MapGenerator";
-import { hexId } from "./HexUtils";
+import { hexId, getNeighbors } from "./HexUtils";
 import blueprintData from "../data/units.json";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -20,12 +20,13 @@ const WAREHOUSE_CAPACITY_BONUS = 250;
 
 // BuildingKey → keyof BuildingLevels  (e.g. "factory" → "factoryLevel")
 const BUILDING_LEVEL_KEY: Record<BuildingKey, string> = {
-  barracks: "barracksLevel",
-  factory: "factoryLevel",
+  barracks:  "barracksLevel",
+  factory:   "factoryLevel",
   warehouse: "warehouseLevel",
-  airport: "airportLevel",
-  harbor: "harborLevel",
-  turret: "turretLevel",
+  airport:   "airportLevel",
+  harbor:    "harborLevel",
+  turret:    "turretLevel",
+  market:    "marketLevel",
 };
 
 // ─── GameState ────────────────────────────────────────────────────────────────
@@ -40,8 +41,10 @@ export class GameState implements IGameState {
   enemyResources: PlayerResources = { credits: 200, maxCredits: BASE_MAX_CREDITS };
   unitBlueprints: Map<string, UnitBlueprint> = new Map();
   unitInstanceCounter: number = 0;
+  readonly seed: number | undefined;
 
-  constructor() {
+  constructor(seed?: number) {
+    this.seed = seed;
     this.loadBlueprints();
     this.initMap();
   }
@@ -55,7 +58,7 @@ export class GameState implements IGameState {
   }
 
   private initMap(): void {
-    const { cells, cities } = generateStarterMap();
+    const { cells, cities } = generateStarterMap(this.seed);
     for (const cell of cells) this.hexMap.set(cell.id, cell);
     for (const city of cities) this.cities.set(city.id, city);
     this.recalcMaxCredits("player");
@@ -146,6 +149,7 @@ export class GameState implements IGameState {
     airport:   [200],
     harbor:    [200],
     turret:    [90,  180, 270],
+    market:    [150, 300, 450],
   };
 
   private static readonly MAX_LEVELS: Record<BuildingKey, number> = {
@@ -155,7 +159,20 @@ export class GameState implements IGameState {
     airport:   1,
     harbor:    1,
     turret:    3,
+    market:    3,
   };
+
+  /** Returns true if any neighbor hex of the city is water terrain. */
+  isCityCoastal(cityId: string): boolean {
+    const city = this.cities.get(cityId);
+    if (!city) return false;
+    const hex = this.hexMap.get(city.hexId);
+    if (!hex) return false;
+    return getNeighbors(hex.q, hex.r).some((n) => {
+      const nHex = this.hexMap.get(hexId(n.q, n.r));
+      return nHex?.terrain === "water";
+    });
+  }
 
   /**
    * Instantly upgrades a building in a city. Returns an error string or null on success.
@@ -164,6 +181,10 @@ export class GameState implements IGameState {
     const city = this.cities.get(cityId);
     if (!city) return "City not found.";
     if (city.owner !== "player") return "Can only upgrade player-owned cities.";
+
+    if (building === "harbor" && !this.isCityCoastal(cityId)) {
+      return "Harbor requires a coastal city (adjacent to water).";
+    }
 
     const levelKey = BUILDING_LEVEL_KEY[building] as keyof typeof city.buildings;
     const currentLevel = city.buildings[levelKey] as number;
@@ -246,6 +267,26 @@ export class GameState implements IGameState {
     const hex = this.hexMap.get(unit.hexId);
     if (hex) hex.unitId = null;
     this.units.delete(instanceId);
+  }
+
+  /**
+   * Merges two friendly land units on the same hex — adds the moving unit's HP to
+   * the target and removes the moving unit from the board. Returns false if the
+   * merge is not valid (different owners, etc.).
+   */
+  mergeUnits(movingId: string, targetId: string): boolean {
+    const moving = this.units.get(movingId);
+    const target = this.units.get(targetId);
+    if (!moving || !target) return false;
+    if (moving.owner !== target.owner) return false;
+
+    target.hp += moving.hp;
+    target.hasMoved = true;
+
+    const sourceHex = this.hexMap.get(moving.hexId);
+    if (sourceHex) sourceHex.unitId = null;
+    this.units.delete(movingId);
+    return true;
   }
 
   /**

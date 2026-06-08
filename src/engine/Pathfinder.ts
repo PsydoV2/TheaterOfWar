@@ -27,6 +27,11 @@ export function getReachable(
 ): string[] {
   if (movementType === "ballistic") return [];
 
+  // Determine the moving unit's owner so we can allow stacking with friendlies
+  const startCell = state.hexMap.get(startHexId);
+  const movingUnit = startCell?.unitId ? state.units.get(startCell.unitId) : undefined;
+  const movingOwner = movingUnit?.owner;
+
   // cost[id] = minimum steps to reach this hex (includes occupied to block re-entry)
   const cost = new Map<string, number>([[startHexId, 0]]);
   const queue: Array<{ id: string; steps: number }> = [{ id: startHexId, steps: 0 }];
@@ -52,8 +57,15 @@ export function getReachable(
       if (cell.unitId === null) {
         reachable.push(nId);
         queue.push({ id: nId, steps: newSteps });
+      } else if (movementType === "land" && movingOwner !== undefined) {
+        // Allow stopping on a friendly land unit (stack/merge) — but never pass through
+        const occupier = state.units.get(cell.unitId);
+        const occupierBp = occupier ? state.unitBlueprints.get(occupier.blueprintId) : undefined;
+        if (occupier?.owner === movingOwner && occupierBp?.movement.type === "land") {
+          reachable.push(nId);
+        }
+        // Occupied hex is blocked for pass-through regardless
       }
-      // Occupied hex: recorded in cost map (blocks re-entry) but NOT queued (blocks pass-through)
     }
   }
 

@@ -1,13 +1,15 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 
 export class SceneManager {
   readonly scene: THREE.Scene;
   readonly camera: THREE.OrthographicCamera;
   readonly renderer: THREE.WebGLRenderer;
+  readonly labelRenderer: CSS2DRenderer;
   readonly controls: OrbitControls;
 
-  private frustumSize = 22;
+  private frustumSize = 30;
 
   constructor(canvas: HTMLCanvasElement) {
     // ── Scene ────────────────────────────────────────────────────────────────
@@ -23,7 +25,7 @@ export class SceneManager {
        f / 2,            -f / 2,
       0.1, 400
     );
-    this.camera.position.set(16, 20, 16);
+    this.camera.position.set(22, 28, 22);
     this.camera.lookAt(0, 0, 0);
 
     // ── Renderer ─────────────────────────────────────────────────────────────
@@ -42,12 +44,22 @@ export class SceneManager {
     sun.position.set(8, 20, 6);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(sun.shadow.camera, { near: 0.5, far: 120, left: -28, right: 28, top: 28, bottom: -28 });
+    Object.assign(sun.shadow.camera, { near: 0.5, far: 180, left: -40, right: 40, top: 40, bottom: -40 });
     this.scene.add(sun);
 
     const fill = new THREE.DirectionalLight(0x8899ff, 0.35);
     fill.position.set(-6, 4, -6);
     this.scene.add(fill);
+
+    // ── CSS2D label overlay (HP bars, etc.) ──────────────────────────────────
+    this.labelRenderer = new CSS2DRenderer();
+    this.labelRenderer.setSize(canvas.clientWidth, canvas.clientHeight);
+    this.labelRenderer.domElement.style.position = "absolute";
+    this.labelRenderer.domElement.style.top = "0";
+    this.labelRenderer.domElement.style.left = "0";
+    this.labelRenderer.domElement.style.pointerEvents = "none";
+    this.labelRenderer.domElement.style.zIndex = "1";
+    document.body.appendChild(this.labelRenderer.domElement);
 
     // ── Controls: pan + zoom only, no rotation ───────────────────────────────
     this.controls = new OrbitControls(this.camera, canvas);
@@ -76,6 +88,7 @@ export class SceneManager {
     this.camera.bottom =  -f / 2;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(c.clientWidth, c.clientHeight, false);
+    this.labelRenderer.setSize(c.clientWidth, c.clientHeight);
   }
 
   start(tick: (dt: number) => void): void {
@@ -86,6 +99,7 @@ export class SceneManager {
       this.controls.update();
       tick(dt);
       this.renderer.render(this.scene, this.camera);
+      this.labelRenderer.render(this.scene, this.camera);
     };
     requestAnimationFrame(loop);
   }

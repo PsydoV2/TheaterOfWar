@@ -158,10 +158,10 @@ function performAttack(attackerId: string, defenderId: string): void {
 const overlay = el("div", "fixed inset-0 pointer-events-none");
 document.body.appendChild(overlay);
 
-// ── Top bar (z-[100] so it's always above city panel z-50) ───────────────────
+// ── Top bar ───────────────────────────────────────────────────────────────────
 const topBar = el("div",
-  "absolute top-0 left-0 right-0 flex items-center justify-between px-5 py-3 " +
-  "bg-gradient-to-b from-black/80 to-transparent pointer-events-none z-[100]"
+  "absolute top-0 left-0 right-0 flex items-center justify-between pl-5 pr-[22rem] py-3 " +
+  "bg-gradient-to-b from-black/80 to-transparent pointer-events-none"
 );
 
 const titleBlock = el("div", "");
@@ -177,21 +177,34 @@ resourceBar.appendChild(creditsEl);
 resourceBar.appendChild(productionEl);
 resourceBar.appendChild(unitsEl);
 
-// End Turn button — always visible, high z-index
-const rightBar   = el("div", "flex items-center gap-4 pointer-events-auto");
-const turnLabel  = el("span", "text-gray-400 text-xs font-mono");
-const btnEndTurn = el("button",
-  "bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-black font-bold " +
-  "py-2 px-6 rounded transition-colors text-sm tracking-wide",
-  "END TURN"
-);
-rightBar.appendChild(turnLabel);
-rightBar.appendChild(btnEndTurn);
-
 topBar.appendChild(titleBlock);
 topBar.appendChild(resourceBar);
-topBar.appendChild(rightBar);
 overlay.appendChild(topBar);
+
+// ─── End Turn HUD — standalone fixed, outside overlay stacking context ────────
+const endTurnHud = el("div",
+  "fixed bottom-7 left-1/2 -translate-x-1/2 z-[200] pointer-events-auto " +
+  "flex flex-col items-center gap-1.5"
+);
+
+const turnLabel = el("div",
+  "text-gray-600 text-[10px] font-mono uppercase tracking-[0.3em] select-none"
+);
+
+const btnEndTurn = el("button",
+  "bg-amber-500 text-gray-950 font-black uppercase tracking-[0.12em] text-base " +
+  "px-14 py-3 w-56 " +
+  "shadow-[0_0_32px_rgba(245,158,11,0.45),0_2px_12px_rgba(0,0,0,0.7)] " +
+  "hover:bg-amber-400 hover:shadow-[0_0_52px_rgba(245,158,11,0.7),0_2px_12px_rgba(0,0,0,0.7)] " +
+  "active:scale-[0.97] active:bg-amber-600 " +
+  "transition-all duration-150 " +
+  "disabled:opacity-20 disabled:pointer-events-none",
+  "END TURN"
+);
+
+endTurnHud.appendChild(turnLabel);
+endTurnHud.appendChild(btnEndTurn);
+document.body.appendChild(endTurnHud);
 
 // Hover/selection info panel (bottom-left)
 const hoverPanel = el("div",
@@ -294,7 +307,6 @@ function showEndScreen(outcome: "victory" | "defeat"): void {
   screen.appendChild(el("div", "mt-4 text-gray-400 text-sm font-mono", sub));
   overlay.appendChild(screen);
   btnEndTurn.disabled = true;
-  btnEndTurn.classList.add("opacity-40", "cursor-not-allowed");
 }
 
 // ─── Turn Summary Modal ───────────────────────────────────────────────────────

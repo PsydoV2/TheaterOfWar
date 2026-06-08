@@ -1,5 +1,5 @@
 import type { HexCell, City, BuildingLevels, Owner, TerrainType } from "./types";
-import { hexId } from "./HexUtils";
+import { hexId, getNeighbors } from "./HexUtils";
 
 export interface MapData {
   cells: HexCell[];
@@ -77,7 +77,7 @@ const CITY_LOCATIONS: Record<string, CityDef> = {
     id: "city_player_port",
     name: "Allied Harbor",
     owner: "player",
-    buildings: { harborLevel: 1 },
+    buildings: { barracksLevel: 1, factoryLevel: 1, warehouseLevel: 1 },
   },
 
   // ── Enemy (top-right) ───────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ const CITY_LOCATIONS: Record<string, CityDef> = {
     id: "city_enemy_port",
     name: "Enemy Harbor",
     owner: "enemy",
-    buildings: { harborLevel: 1 },
+    buildings: { barracksLevel: 1, factoryLevel: 1, warehouseLevel: 1 },
   },
 
   // ── Neutral inland ─────────────────────────────────────────────────────────
@@ -131,10 +131,9 @@ const STATIC_TERRAIN_OVERRIDES: Record<string, TerrainType> = {
   "-1_5": "forest", "1_3":  "forest",
   "-5_1": "forest", "4_2":  "forest",
 
-  // Inland water (rivers/lakes)
-  "0_1":  "water", "-1_2": "water", "1_-1": "water",
-  "0_2":  "water", "-1_-2": "water", "1_0": "water",
-  "2_2":  "water", "-2_2": "water",
+  // Inland river (connected chain: 1_-1 → 1_0 → 0_1 → 0_2 → -1_2 → -2_2)
+  "1_-1": "water", "1_0": "water", "0_1": "water",
+  "0_2":  "water", "-1_2": "water", "-2_2": "water",
 };
 
 // ─── Seeded terrain generation ────────────────────────────────────────────────
@@ -153,6 +152,25 @@ function pickTerrain(roll: number): TerrainType {
   return "plains";
 }
 
+/** Converts isolated water tiles (no water neighbors) to plains. Repeats until stable. */
+function removeIsolatedWater(terrain: Map<string, TerrainType>): void {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [id, t] of terrain) {
+      if (t !== "water") continue;
+      const [q, r] = id.split("_").map(Number) as [number, number];
+      const hasWaterNeighbor = getNeighbors(q, r).some(
+        (n) => terrain.get(hexId(n.q, n.r)) === "water"
+      );
+      if (!hasWaterNeighbor) {
+        terrain.set(id, "plains");
+        changed = true;
+      }
+    }
+  }
+}
+
 function generateTerrainWithSeed(
   rng: () => number,
   cityHexIds: Set<string>,
@@ -166,6 +184,7 @@ function generateTerrainWithSeed(
       terrain.set(id, cityHexIds.has(id) ? "plains" : pickTerrain(rng()));
     }
   }
+  removeIsolatedWater(terrain);
   return terrain;
 }
 

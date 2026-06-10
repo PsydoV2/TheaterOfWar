@@ -362,6 +362,17 @@ export class UnitRenderer {
     group.position.copy(this.worldPosForHex(hId, state));
   }
 
+  applyFog(visibleHexIds: Set<string>, state: IGameState): void {
+    for (const [id, group] of this.unitGroups) {
+      const unit = state.units.get(id);
+      if (!unit || unit.owner === "player") {
+        group.visible = true;
+        continue;
+      }
+      group.visible = visibleHexIds.has(unit.hexId);
+    }
+  }
+
   getUnitMeshes(): THREE.Object3D[] {
     return [...this.unitGroups.values()];
   }

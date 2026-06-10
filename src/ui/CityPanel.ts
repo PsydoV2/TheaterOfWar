@@ -1,7 +1,6 @@
 import type { GameState } from "../engine/GameState";
 import type { City, BuildingKey, UnitBlueprint } from "../engine/types";
 import { el } from "./dom";
-import { getNeighbors } from "../engine/HexUtils";
 
 // ─── Building metadata (static) ───────────────────────────────────────────────
 
@@ -159,7 +158,7 @@ export class CityPanel {
       rightGroup.appendChild(pips);
 
       // Harbor: only coastal cities can build it
-      const isLocked = key === "harbor" && currentLevel === 0 && !this.isCoastal(city);
+      const isLocked = key === "harbor" && currentLevel === 0 && !this.state.isCityCoastal(city.id);
 
       // Upgrade button (only for player-owned cities)
       if (isPlayer) {
@@ -328,15 +327,6 @@ export class CityPanel {
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
-
-  private isCoastal(city: City): boolean {
-    const hex = this.state.getHexById(city.hexId);
-    if (!hex) return false;
-    return getNeighbors(hex.q, hex.r).some((n) => {
-      const nHex = this.state.getHex(n.q, n.r);
-      return nHex?.terrain === "water";
-    });
-  }
 
   private getAvailableBlueprints(city: City): UnitBlueprint[] {
     const result: UnitBlueprint[] = [];

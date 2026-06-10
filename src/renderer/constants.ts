@@ -3,7 +3,7 @@ import type { TerrainType, Owner } from "../engine/types";
 export const HEX_SIZE = 1.2;
 export const HEX_HEIGHT = 0.18;
 export const HEX_SEGMENTS = 6;
-export const HEX_GAP = 0.14;
+export const HEX_GAP = 0.15;
 
 /** Axial → world XZ (pointy-top hex layout). */
 export function hexToWorld(q: number, r: number): { x: number; z: number } {

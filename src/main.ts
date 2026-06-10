@@ -1,9 +1,10 @@
 import "./style.css";
 import { GameState } from "./engine/GameState";
 import { TurnResolver } from "./engine/TurnResolver";
-import type { TurnEvent, TurnResult } from "./engine/types";
+import type { TurnEvent } from "./engine/types";
 import type { Owner } from "./engine/types";
 import { getReachable, getAttackableTargets, findPath } from "./engine/Pathfinder";
+import { hexId, parseHexId, getHexesInRange } from "./engine/HexUtils";
 import { resolveCombatPair } from "./engine/CombatResolver";
 import type { CombatEvent } from "./engine/CombatResolver";
 import { SceneManager } from "./renderer/SceneManager";
@@ -97,6 +98,38 @@ const cityPanel = new CityPanel(state, (cityId) => {
 let selectedUnitId:   string | null = null;
 let currentReachable: string[]      = [];
 let currentAttackable: string[]     = [];
+
+// ─── Fog of War ───────────────────────────────────────────────────────────────
+
+const UNIT_VISION = 3;
+const CITY_VISION = 2;
+
+function computeVisibleHexes(): Set<string> {
+  const visible = new Set<string>();
+  for (const unit of state.getUnitsBy("player")) {
+    const coord = parseHexId(unit.hexId);
+    visible.add(unit.hexId);
+    for (const n of getHexesInRange(coord, UNIT_VISION)) {
+      const id = hexId(n.q, n.r);
+      if (state.getHexById(id)) visible.add(id);
+    }
+  }
+  for (const city of state.getCitiesBy("player")) {
+    const coord = parseHexId(city.hexId);
+    visible.add(city.hexId);
+    for (const n of getHexesInRange(coord, CITY_VISION)) {
+      const id = hexId(n.q, n.r);
+      if (state.getHexById(id)) visible.add(id);
+    }
+  }
+  return visible;
+}
+
+function updateFog(): void {
+  const visible = computeVisibleHexes();
+  hexRenderer.applyFog(visible);
+  unitRenderer.applyFog(visible, state);
+}
 
 function selectUnit(instanceId: string): void {
   const unit = state.getUnit(instanceId);
@@ -269,16 +302,28 @@ function updateResources(): void {
   turnLabel.textContent    = `Turn ${state.turn}`;
 }
 
+const MAX_LOG_TURNS = 5;
+const logSections: HTMLElement[][] = [];
+
 function appendLog(events: TurnEvent[], turnNum: number): void {
-  logPanel.appendChild(
-    el("div", "border-t border-gray-800 pt-1 mt-1 text-gray-500 uppercase tracking-widest",
-      `── T${turnNum} ──`)
-  );
+  const section: HTMLElement[] = [];
+
+  const header = el("div", "border-t border-gray-800 pt-1 mt-1 text-gray-500 uppercase tracking-widest", `── T${turnNum} ──`);
+  logPanel.appendChild(header);
+  section.push(header);
+
   for (const ev of events) {
     const row = el("div", `flex gap-1.5 ${ownerColor(ev.owner)}`);
     row.appendChild(document.createTextNode(catIcon(ev.category) + " " + ev.message));
     logPanel.appendChild(row);
+    section.push(row);
   }
+
+  logSections.push(section);
+  if (logSections.length > MAX_LOG_TURNS) {
+    for (const node of logSections.shift()!) node.remove();
+  }
+
   logPanel.scrollTop = logPanel.scrollHeight;
 }
 
@@ -309,109 +354,58 @@ function showEndScreen(outcome: "victory" | "defeat"): void {
   btnEndTurn.disabled = true;
 }
 
-// ─── Turn Summary Modal ───────────────────────────────────────────────────────
+// ─── Turn Banner ─────────────────────────────────────────────────────────────
 
-function showTurnSummaryModal(result: TurnResult): Promise<void> {
-  return new Promise((resolve) => {
-    const backdrop = el("div",
-      "fixed inset-0 z-[200] flex items-center justify-center bg-black/65 pointer-events-auto"
-    );
+function showTurnBanner(turn: number): void {
+  const banner = document.createElement("div");
+  banner.style.cssText = [
+    "position:fixed", "inset:0", "z-index:300",
+    "display:flex", "flex-direction:column",
+    "align-items:center", "justify-content:center",
+    "pointer-events:none",
+    "opacity:0",
+    "transition:opacity 0.25s ease",
+  ].join(";");
 
-    const panel = el("div",
-      "bg-gray-950 border border-gray-700 rounded-lg shadow-2xl w-[520px] max-h-[80vh] " +
-      "flex flex-col overflow-hidden"
-    );
+  const bar = document.createElement("div");
+  bar.style.cssText = [
+    "background:rgba(0,0,0,0.72)",
+    "border-top:1px solid rgba(245,158,11,0.3)",
+    "border-bottom:1px solid rgba(245,158,11,0.3)",
+    "padding:18px 80px",
+    "display:flex", "flex-direction:column", "align-items:center", "gap:6px",
+    "transform:translateY(12px)",
+    "transition:transform 0.25s ease",
+  ].join(";");
 
-    // Header
-    const header = el("div",
-      "flex items-center justify-between px-5 py-4 border-b border-gray-800 flex-shrink-0"
-    );
-    header.appendChild(
-      el("h2", "text-base font-bold tracking-widest text-amber-400 uppercase",
-        `Turn ${result.turn} — What Happened`)
-    );
-    const closeBtn = el("button",
-      "text-gray-500 hover:text-white transition-colors text-xl leading-none",
-      "✕"
-    );
-    header.appendChild(closeBtn);
-    panel.appendChild(header);
+  const label = document.createElement("div");
+  label.style.cssText = "font:900 11px/1 monospace;letter-spacing:0.35em;color:#6b7280;text-transform:uppercase";
+  label.textContent = "turn begins";
 
-    // Body
-    const body = el("div", "flex-1 overflow-y-auto p-5 space-y-5");
+  const num = document.createElement("div");
+  num.style.cssText = [
+    "font:900 52px/1 monospace",
+    "letter-spacing:0.12em",
+    "color:#f59e0b",
+    "text-shadow:0 0 40px rgba(245,158,11,0.6)",
+    "text-transform:uppercase",
+  ].join(";");
+  num.textContent = String(turn);
 
-    const playerIncomeEvts = result.events.filter(
-      (e) => e.category === "income" && e.owner === "player"
-    );
-    const playerProdEvts = result.events.filter(
-      (e) => e.category === "production" && e.owner === "player"
-    );
-    const enemyEvts = result.events.filter(
-      (e) => e.owner === "enemy" && (e.category === "ai" || e.category === "combat")
-    );
-    const turretEvts = result.events.filter((e) => e.category === "turret");
-    const combatEvts = result.events.filter(
-      (e) => e.category === "combat" && e.owner !== "enemy"
-    );
+  bar.appendChild(label);
+  bar.appendChild(num);
+  banner.appendChild(bar);
+  document.body.appendChild(banner);
 
-    if (playerIncomeEvts.length > 0 || playerProdEvts.length > 0) {
-      body.appendChild(buildSection("💰 Allied Economy", "text-blue-400",
-        [...playerIncomeEvts, ...playerProdEvts]));
-    }
-
-    if (enemyEvts.length > 0) {
-      body.appendChild(buildSection("🤖 Enemy Activity", "text-red-400", enemyEvts));
-    }
-
-    if (combatEvts.length > 0) {
-      body.appendChild(buildSection("⚔️ Combat Results", "text-orange-400", combatEvts));
-    }
-
-    if (turretEvts.length > 0) {
-      body.appendChild(buildSection("🛡️ Turret Fire", "text-yellow-500", turretEvts));
-    }
-
-    if (
-      playerIncomeEvts.length === 0 && playerProdEvts.length === 0 &&
-      enemyEvts.length === 0 && combatEvts.length === 0 && turretEvts.length === 0
-    ) {
-      body.appendChild(el("p", "text-gray-600 text-sm italic", "A quiet turn."));
-    }
-
-    panel.appendChild(body);
-
-    // Footer
-    const footer = el("div", "flex justify-end px-5 py-4 border-t border-gray-800 flex-shrink-0");
-    const continueBtn = el("button",
-      "bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-black font-bold " +
-      "py-2 px-8 rounded transition-colors text-sm tracking-wide",
-      "CONTINUE →"
-    );
-    footer.appendChild(continueBtn);
-    panel.appendChild(footer);
-
-    backdrop.appendChild(panel);
-    document.body.appendChild(backdrop);
-
-    const dismiss = (): void => {
-      backdrop.remove();
-      resolve();
-    };
-    closeBtn.addEventListener("click", dismiss);
-    continueBtn.addEventListener("click", dismiss);
-    backdrop.addEventListener("click", (e) => { if (e.target === backdrop) dismiss(); });
+  requestAnimationFrame(() => {
+    banner.style.opacity = "1";
+    bar.style.transform = "translateY(0)";
+    setTimeout(() => {
+      banner.style.opacity = "0";
+      bar.style.transform = "translateY(-8px)";
+      banner.addEventListener("transitionend", () => banner.remove(), { once: true });
+    }, 1300);
   });
-}
-
-function buildSection(title: string, titleClass: string, events: TurnEvent[]): HTMLElement {
-  const section = el("div", "");
-  section.appendChild(el("h3", `text-xs font-bold uppercase tracking-widest mb-2 ${titleClass}`, title));
-  for (const ev of events) {
-    const row = el("div", "text-xs font-mono text-gray-300 py-0.5 leading-relaxed");
-    row.appendChild(document.createTextNode(ev.message));
-    section.appendChild(row);
-  }
-  return section;
 }
 
 // ─── Hover panel ──────────────────────────────────────────────────────────────
@@ -467,6 +461,16 @@ function updateHoverPanel(hexId: string | null): void {
       hoverPanel.appendChild(
         el("div", ownerColor(unit.owner), `${unit.owner.toUpperCase()} — ${unit.hp}/${bp?.maxHp ?? "?"}HP`)
       );
+
+      if (bp) {
+        const statsRow = el("div", "flex gap-2 mt-1 text-xs text-gray-500");
+        statsRow.appendChild(el("span", "", `🗡 ${bp.combat.damageVsLand}`));
+        if (bp.combat.damageVsAir > 0) statsRow.appendChild(el("span", "", `✈ ${bp.combat.damageVsAir}`));
+        if (bp.combat.damageVsSea > 0) statsRow.appendChild(el("span", "", `⚓ ${bp.combat.damageVsSea}`));
+        statsRow.appendChild(el("span", "ml-auto", `Rng ${bp.combat.range}`));
+        statsRow.appendChild(el("span", "", `Mv ${bp.movement.range}`));
+        hoverPanel.appendChild(statsRow);
+      }
 
       if (unit.owner === "player") {
         if (unit.hasMoved && unit.hasAttacked)
@@ -532,8 +536,42 @@ new InputManager(
       }
 
       if (unit.owner === "player") {
-        if (selectedUnitId === unit.instanceId) deselect();
-        else selectUnit(unit.instanceId);
+        // Merge: selected unit moves onto this friendly land unit
+        if (
+          selectedUnitId &&
+          selectedUnitId !== unit.instanceId &&
+          currentReachable.includes(hexId)
+        ) {
+          const movingUnit = state.getUnit(selectedUnitId);
+          const movingBp   = movingUnit ? state.getBlueprint(movingUnit.blueprintId) : undefined;
+          const targetBp   = state.getBlueprint(unit.blueprintId);
+          if (movingBp?.movement.type === "land" && targetBp?.movement.type === "land") {
+            unitRenderer.animateTo(selectedUnitId, hexId, state);
+            state.mergeUnits(selectedUnitId, unit.instanceId);
+            deselect();
+            unitRenderer.syncWithState(state);
+            updateResources();
+            updateFog();
+            return;
+          }
+        }
+
+        const alreadySelected = selectedUnitId === unit.instanceId;
+        const spent = unit.hasMoved && unit.hasAttacked;
+
+        if (alreadySelected || spent) {
+          deselect();
+          if (cell.cityId) {
+            const city = state.getCity(cell.cityId);
+            if (city) {
+              if (cityPanel.currentCity() === cell.cityId && cityPanel.isOpen()) cityPanel.close();
+              else cityPanel.open(cell.cityId);
+            }
+          }
+          return;
+        }
+
+        selectUnit(unit.instanceId);
         return;
       }
 
@@ -578,6 +616,7 @@ new InputManager(
       }
 
       unitRenderer.syncWithState(state);
+      updateFog();
       selectUnit(movedId);
       return;
     }
@@ -597,6 +636,18 @@ new InputManager(
   }
 );
 
+// ─── Keyboard shortcuts ───────────────────────────────────────────────────────
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    deselect();
+    cityPanel.close();
+  }
+  if (e.key === "Enter" && !btnEndTurn.disabled) {
+    btnEndTurn.click();
+  }
+});
+
 // ─── End Turn ─────────────────────────────────────────────────────────────────
 
 btnEndTurn.addEventListener("click", async () => {
@@ -607,15 +658,13 @@ btnEndTurn.addEventListener("click", async () => {
 
   const result = resolver.resolve();
 
-  // Sync 3D view immediately (background updates while modal is shown)
   appendLog(result.events, result.turn);
   updateResources();
   hexRenderer.syncCityOwners(state);
   unitRenderer.syncWithState(state);
   cityPanel.refresh();
-
-  // Show the turn summary modal
-  await showTurnSummaryModal(result);
+  updateFog();
+  showTurnBanner(state.turn);
 
   btnEndTurn.disabled = false;
   btnEndTurn.textContent = "END TURN";
@@ -628,6 +677,7 @@ btnEndTurn.addEventListener("click", async () => {
 // ─── Render Loop ──────────────────────────────────────────────────────────────
 
 updateResources();
+updateFog();
 sceneManager.start((dt) => {
   unitRenderer.update(dt);
 });

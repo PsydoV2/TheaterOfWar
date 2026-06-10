@@ -5,8 +5,17 @@ import { hexDistance, parseHexId } from "./HexUtils";
 import { resolveCombatPair } from "./CombatResolver";
 import type { CombatEvent } from "./CombatResolver";
 
-// Preferred units to build, in priority order
-const PRODUCTION_PRIORITY = ["tank_medium", "infantry_elite", "infantry_basic"];
+function getBuildPriority(state: GameState): string[] {
+  const playerUnits = state.getUnitsBy("player");
+  const airCount  = playerUnits.filter(u => state.getBlueprint(u.blueprintId)?.movement.type === "air").length;
+  const seaCount  = playerUnits.filter(u => state.getBlueprint(u.blueprintId)?.movement.type === "water").length;
+  const tankCount = playerUnits.filter(u => u.blueprintId === "tank_medium" || u.blueprintId === "tank_heavy").length;
+
+  if (airCount >= 2)  return ["tank_heavy", "infantry_elite", "artillery", "tank_medium", "infantry_basic"];
+  if (seaCount >= 2)  return ["destroyer", "tank_medium", "infantry_elite", "infantry_basic"];
+  if (tankCount >= 3) return ["artillery", "tank_heavy", "tank_medium", "infantry_elite", "infantry_basic"];
+  return ["tank_medium", "artillery", "infantry_elite", "tank_heavy", "infantry_basic"];
+}
 
 function nearestPlayerTarget(fromHexId: string, state: GameState): string | null {
   const from = parseHexId(fromHexId);
@@ -70,9 +79,10 @@ export function runEnemyAI(state: GameState): TurnEvent[] {
   const events: TurnEvent[] = [];
 
   // Queue production in idle enemy cities
+  const buildPriority = getBuildPriority(state);
   for (const city of state.getCitiesBy("enemy")) {
     if (city.productionQueue.length > 0) continue;
-    for (const bpId of PRODUCTION_PRIORITY) {
+    for (const bpId of buildPriority) {
       const bp = state.getBlueprint(bpId);
       if (!bp) continue;
       const err = state.queueProduction(city.id, bpId);

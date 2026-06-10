@@ -84,6 +84,12 @@ const BUILDING_KEYS: BuildingKey[] = [
 ];
 
 const MAT_INVISIBLE = new THREE.MeshBasicMaterial({ visible: false });
+const MAT_FOG = new THREE.MeshBasicMaterial({
+  color: 0x000010,
+  transparent: true,
+  opacity: 0.62,
+  depthWrite: false,
+});
 const MAT_HOVER = new THREE.MeshBasicMaterial({
   color: 0xffdd44,
   transparent: true,
@@ -120,6 +126,7 @@ export class HexRenderer {
   private readonly meshToHexId = new Map<THREE.Mesh, string>();
   private readonly cities = new Map<string, CityEntry>(); // hexId → city visual
   private readonly buildingMarkers = new Map<string, THREE.Object3D[]>(); // hexId → markers
+  private readonly fogOverlays = new Map<string, THREE.Mesh>(); // hexId → fog disc
   private readonly hoverMesh: THREE.Mesh;
   private readonly rangeOverlays: THREE.Mesh[] = [];
   private readonly scene: THREE.Scene;
@@ -244,10 +251,15 @@ export class HexRenderer {
     const model = this.spawnCityModel(owner, pos, models);
 
     // Ownership ring beneath city model (also acts as fallback visibility)
-    const ringGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.04, HEX_SEGMENTS);
-    const ringMat = new THREE.MeshBasicMaterial({ color: OWNER_COLORS[owner] });
+    const ringGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.02, HEX_SEGMENTS);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: OWNER_COLORS[owner],
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
     const ring = new THREE.Mesh(ringGeo, ringMat);
-    ring.position.set(x, surfY + 0.01, z);
+    ring.position.set(x, surfY + 0.03, z);
     ring.rotation.y = HEX_ROT_Y;
     ring.renderOrder = 1;
     this.scene.add(ring);
@@ -410,6 +422,23 @@ export class HexRenderer {
     }
 
     this.buildingMarkers.set(hexId, markers);
+  }
+
+  // ─── Fog of War ───────────────────────────────────────────────────────────
+
+  applyFog(visibleHexIds: Set<string>): void {
+    for (const [id, base] of this.baseMeshes) {
+      let overlay = this.fogOverlays.get(id);
+      if (!overlay) {
+        overlay = new THREE.Mesh(GEO_HOVER, MAT_FOG);
+        overlay.position.set(base.position.x, base.position.y + HEX_HEIGHT * 0.56, base.position.z);
+        overlay.rotation.y = HEX_ROT_Y;
+        overlay.renderOrder = 6;
+        this.scene.add(overlay);
+        this.fogOverlays.set(id, overlay);
+      }
+      overlay.visible = !visibleHexIds.has(id);
+    }
   }
 
   // ─── Raycasting interface ─────────────────────────────────────────────────

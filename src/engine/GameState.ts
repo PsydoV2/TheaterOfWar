@@ -210,11 +210,19 @@ export class GameState implements IGameState {
 
   /**
    * Transfers ownership of a city to a new owner and clears its production queue.
+   * Previous owner gets 50% refund on any queued production.
    */
   captureCity(cityId: string, newOwner: Owner): void {
     const city = this.cities.get(cityId);
     if (!city) return;
     const prevOwner = city.owner;
+    if (prevOwner !== "neutral") {
+      const res = this.resources(prevOwner);
+      for (const item of city.productionQueue) {
+        const bp = this.unitBlueprints.get(item.blueprintId);
+        if (bp) res.credits = Math.min(res.credits + Math.floor(bp.cost.credits * 0.5), res.maxCredits);
+      }
+    }
     city.owner = newOwner;
     city.productionQueue = [];
     if (prevOwner !== "neutral") this.recalcMaxCredits(prevOwner);
@@ -222,11 +230,18 @@ export class GameState implements IGameState {
   }
 
   /**
-   * Cancels a queue item by index. No credit refund (credits were committed on queue).
+   * Cancels a queue item by index. Full credit refund since credits were pre-paid.
    */
   cancelProduction(cityId: string, index: number): void {
     const city = this.cities.get(cityId);
     if (!city) return;
+    const item = city.productionQueue[index];
+    if (!item) return;
+    const bp = this.unitBlueprints.get(item.blueprintId);
+    if (bp) {
+      const res = this.resources(city.owner);
+      res.credits = Math.min(res.credits + bp.cost.credits, res.maxCredits);
+    }
     city.productionQueue.splice(index, 1);
   }
 
@@ -280,7 +295,8 @@ export class GameState implements IGameState {
     if (!moving || !target) return false;
     if (moving.owner !== target.owner) return false;
 
-    target.hp += moving.hp;
+    const bp = this.unitBlueprints.get(target.blueprintId);
+    target.hp = Math.min(target.hp + moving.hp, bp?.maxHp ?? target.hp + moving.hp);
     target.hasMoved = true;
 
     const sourceHex = this.hexMap.get(moving.hexId);

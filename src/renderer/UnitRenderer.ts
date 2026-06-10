@@ -105,6 +105,7 @@ export class UnitRenderer {
   private readonly shakes: ShakeAnim[] = [];
   private readonly scene: THREE.Scene;
   private models: ModelLoader | null = null;
+  private selectionPulseTime = 0;
 
   constructor(scene: THREE.Scene) {
     this.scene = scene;
@@ -205,11 +206,12 @@ export class UnitRenderer {
 
     group.traverse((child) => {
       if (child.name === "hp-label") {
-        // Update HP label text and color
         const obj = child as CSS2DObject;
         const div = obj.element as HTMLDivElement;
         const maxHp = parseInt(div.dataset["maxHp"] ?? "100", 10);
-        div.textContent = String(unit.hp);
+        div.textContent = unit.stackSize > 1
+          ? `${unit.hp} ×${unit.stackSize}`
+          : String(unit.hp);
         div.style.color = hpColor(unit.hp / maxHp);
         div.style.opacity = acted ? "0.5" : "1";
         return;
@@ -301,6 +303,15 @@ export class UnitRenderer {
   }
 
   update(dt: number): void {
+    // Pulse selection ring opacity
+    if (this.selectionRing.visible) {
+      this.selectionPulseTime += dt * 2.8;
+      (this.selectionRing.material as THREE.MeshBasicMaterial).opacity =
+        0.50 + 0.35 * (0.5 + 0.5 * Math.sin(this.selectionPulseTime * Math.PI * 2));
+    } else {
+      this.selectionPulseTime = 0;
+    }
+
     for (let i = this.animations.length - 1; i >= 0; i--) {
       const anim = this.animations[i]!;
       anim.elapsed += dt;

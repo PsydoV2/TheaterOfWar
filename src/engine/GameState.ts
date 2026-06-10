@@ -266,6 +266,8 @@ export class GameState implements IGameState {
       hp: bp.maxHp,
       hasMoved: false,
       hasAttacked: false,
+      movementLeft: bp.movement.range,
+      stackSize: 1,
     };
 
     this.units.set(instanceId, unit);
@@ -297,7 +299,9 @@ export class GameState implements IGameState {
 
     const bp = this.unitBlueprints.get(target.blueprintId);
     target.hp = Math.min(target.hp + moving.hp, bp?.maxHp ?? target.hp + moving.hp);
+    target.stackSize += moving.stackSize;
     target.hasMoved = true;
+    target.movementLeft = 0;
 
     const sourceHex = this.hexMap.get(moving.hexId);
     if (sourceHex) sourceHex.unitId = null;
@@ -308,7 +312,11 @@ export class GameState implements IGameState {
   /**
    * Moves a unit to a new hex (no pathfinding validation here — that is Phase 4).
    */
-  moveUnit(instanceId: string, targetHexId: string): boolean {
+  /**
+   * Moves a unit to a new hex. `movementCost` deducts from remaining movement
+   * points; pass "all" (default) to exhaust all movement (used by AI and merges).
+   */
+  moveUnit(instanceId: string, targetHexId: string, movementCost: number | "all" = "all"): boolean {
     const unit = this.units.get(instanceId);
     if (!unit) return false;
 
@@ -321,6 +329,9 @@ export class GameState implements IGameState {
     targetHex.unitId = instanceId;
     unit.hexId = targetHexId;
     unit.hasMoved = true;
+    unit.movementLeft = movementCost === "all"
+      ? 0
+      : Math.max(0, unit.movementLeft - movementCost);
     return true;
   }
 
@@ -328,6 +339,7 @@ export class GameState implements IGameState {
     for (const unit of this.units.values()) {
       unit.hasMoved = false;
       unit.hasAttacked = false;
+      unit.movementLeft = this.unitBlueprints.get(unit.blueprintId)?.movement.range ?? 1;
     }
   }
 }

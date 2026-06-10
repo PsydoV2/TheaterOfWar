@@ -90,6 +90,10 @@ export interface MilitaryUnit {
   hp: number;
   hasMoved: boolean;
   hasAttacked: boolean;
+  /** Remaining movement points this turn. Reset to blueprint range each turn. */
+  movementLeft: number;
+  /** How many units have been merged into this one (starts at 1). */
+  stackSize: number;
 }
 
 // ─── Resources ───────────────────────────────────────────────────────────────

@@ -89,3 +89,46 @@ export function resolveCombatPair(
     aDestroyed, bDestroyed,
   };
 }
+
+// ─── Read-only combat preview (no state mutation) ─────────────────────────────
+
+export interface CombatPreview {
+  attackerDeals: number;
+  defenderCounters: number;
+  attackerHpAfter: number;
+  defenderHpAfter: number;
+  attackerDestroyed: boolean;
+  defenderDestroyed: boolean;
+}
+
+export function previewCombat(
+  attackerId: string,
+  defenderId: string,
+  state: IGameState,
+): CombatPreview | null {
+  const a = state.units.get(attackerId);
+  const b = state.units.get(defenderId);
+  if (!a || !b) return null;
+
+  const aBp = state.unitBlueprints.get(a.blueprintId);
+  const bBp = state.unitBlueprints.get(b.blueprintId);
+  if (!aBp || !bBp) return null;
+
+  const bDef = TERRAIN_DEFENSE[state.hexMap.get(b.hexId)?.terrain ?? "plains"];
+  const aDef = TERRAIN_DEFENSE[state.hexMap.get(a.hexId)?.terrain ?? "plains"];
+
+  const attackerDeals   = Math.max(1, Math.round(damageForTarget(aBp, bBp) * (1 - bDef)));
+  const bCanCounter     = !bBp.specialTraits.includes("indirect_fire");
+  const defenderCounters = bCanCounter
+    ? Math.max(0, Math.round(damageForTarget(bBp, aBp) * (1 - aDef)))
+    : 0;
+
+  return {
+    attackerDeals,
+    defenderCounters,
+    attackerHpAfter:   Math.max(0, a.hp - defenderCounters),
+    defenderHpAfter:   Math.max(0, b.hp - attackerDeals),
+    attackerDestroyed: a.hp - defenderCounters <= 0,
+    defenderDestroyed: b.hp - attackerDeals <= 0,
+  };
+}

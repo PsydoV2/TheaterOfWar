@@ -1,24 +1,25 @@
 import type { GameState } from "../engine/GameState";
 import type { City, BuildingKey, UnitBlueprint } from "../engine/types";
-import { el } from "./dom";
+import { el, btn } from "./dom";
 
 // ─── Building metadata (static) ───────────────────────────────────────────────
 
 interface BuildingInfo {
   icon: string;
   label: string;
+  description: string;
   maxLevel: number;
-  upgradeCosts: number[]; // index 0 = cost to reach level 1, etc.
+  upgradeCosts: number[];
 }
 
 const BUILDING_INFO: Record<BuildingKey, BuildingInfo> = {
-  factory:   { icon: "⚙️",  label: "Factory",   maxLevel: 3, upgradeCosts: [100, 200, 300] },
-  barracks:  { icon: "🪖",  label: "Barracks",  maxLevel: 3, upgradeCosts: [80,  160, 240] },
-  warehouse: { icon: "📦",  label: "Warehouse", maxLevel: 3, upgradeCosts: [120, 240, 360] },
-  airport:   { icon: "✈️",  label: "Airport",   maxLevel: 1, upgradeCosts: [200] },
-  harbor:    { icon: "⚓",  label: "Harbor",    maxLevel: 1, upgradeCosts: [200] },
-  turret:    { icon: "🛡️",  label: "Turret",    maxLevel: 3, upgradeCosts: [90,  180, 270] },
-  market:    { icon: "💰",  label: "Market",    maxLevel: 3, upgradeCosts: [150, 300, 450] },
+  factory:   { icon: "⚙️",  label: "Factory",   description: "Production +50⚙/lv/turn",       maxLevel: 3, upgradeCosts: [100, 200, 300] },
+  barracks:  { icon: "🪖",  label: "Barracks",  description: "Unlocks infantry & APC units",   maxLevel: 3, upgradeCosts: [80,  160, 240] },
+  warehouse: { icon: "📦",  label: "Warehouse", description: "Credit cap +250$/lv",            maxLevel: 3, upgradeCosts: [120, 240, 360] },
+  airport:   { icon: "✈️",  label: "Airport",   description: "Unlocks fighters & bombers",     maxLevel: 1, upgradeCosts: [200] },
+  harbor:    { icon: "⚓",  label: "Harbor",    description: "Unlocks naval units",            maxLevel: 1, upgradeCosts: [200] },
+  turret:    { icon: "🛡️",  label: "Turret",    description: "Auto-fires at enemies each turn", maxLevel: 3, upgradeCosts: [90,  180, 270] },
+  market:    { icon: "💰",  label: "Market",    description: "Income +25$/lv/turn",            maxLevel: 3, upgradeCosts: [150, 300, 450] },
 };
 
 const BUILDING_KEYS = Object.keys(BUILDING_INFO) as BuildingKey[];
@@ -33,8 +34,8 @@ export class CityPanel {
   constructor(
     private readonly state: GameState,
     private readonly onUpdate: (cityId: string) => void,
+    private readonly onError: (msg: string) => void = () => {},
   ) {
-    // Outer slide-in container
     this.container = el("div",
       "fixed top-0 right-0 h-full w-80 bg-gray-950 border-l border-gray-700 " +
       "shadow-2xl transition-transform duration-300 translate-x-full z-50 " +
@@ -43,16 +44,11 @@ export class CityPanel {
     this.container.style.pointerEvents = "none";
     document.body.appendChild(this.container);
 
-    // Scrollable body
     this.body = el("div", "flex-1 overflow-y-auto");
     this.container.appendChild(this.body);
 
-    // Stop all clicks inside the panel from reaching the outside-click handler.
-    // Without this, replaceChildren() during a button click removes the target
-    // from the DOM before bubbling reaches the document, causing a false-positive close.
     this.container.addEventListener("click", (e) => e.stopPropagation());
 
-    // Click outside (not canvas, not panel) → close
     document.addEventListener("click", (e) => {
       if (!(e.target as HTMLElement).closest("canvas")) {
         this.close();
@@ -81,7 +77,6 @@ export class CityPanel {
     return this.currentCityId;
   }
 
-  /** Re-renders the panel in-place (e.g. after turn resolves). */
   refresh(): void {
     if (this.currentCityId) this.render();
   }
@@ -116,7 +111,7 @@ export class CityPanel {
     header.appendChild(left);
 
     const closeBtn = el("button",
-      "text-gray-500 hover:text-white transition-colors text-lg leading-none",
+      "text-gray-500 hover:text-white transition-colors text-lg leading-none cursor-pointer",
       "✕"
     );
     closeBtn.addEventListener("click", () => this.close());
@@ -142,9 +137,13 @@ export class CityPanel {
 
       const row = el("div", "flex items-center justify-between py-1.5 gap-2");
 
-      const labelGroup = el("div", "flex items-center gap-2 min-w-0");
-      labelGroup.appendChild(el("span", "text-base leading-none", info.icon));
-      labelGroup.appendChild(el("span", "text-sm text-gray-300", info.label));
+      // Label group with description below
+      const labelGroup = el("div", "flex items-center gap-2 min-w-0 flex-1");
+      labelGroup.appendChild(el("span", "text-base leading-none flex-shrink-0", info.icon));
+      const labelCol = el("div", "flex flex-col");
+      labelCol.appendChild(el("span", "text-sm text-gray-300", info.label));
+      labelCol.appendChild(el("span", "text-[10px] text-gray-600 leading-tight", info.description));
+      labelGroup.appendChild(labelCol);
 
       const rightGroup = el("div", "flex items-center gap-2 flex-shrink-0");
 
@@ -157,32 +156,26 @@ export class CityPanel {
       }
       rightGroup.appendChild(pips);
 
-      // Harbor: only coastal cities can build it
       const isLocked = key === "harbor" && currentLevel === 0 && !this.state.isCityCoastal(city.id);
 
-      // Upgrade button (only for player-owned cities)
       if (isPlayer) {
         if (isLocked) {
           rightGroup.appendChild(el("span", "text-xs text-gray-600 w-16 text-right italic", "inland"));
         } else if (atMax) {
           rightGroup.appendChild(el("span", "text-xs text-gray-600 w-14 text-right", "MAX"));
         } else {
-          const btn = el("button",
-            `text-xs px-2 py-0.5 rounded border transition-colors w-14 text-right ` +
-            (canAfford
-              ? "border-amber-600 text-amber-400 hover:bg-amber-600/20 cursor-pointer"
-              : "border-gray-700 text-gray-600 cursor-not-allowed"),
-            `${upgradeCost}$`
-          );
+          const upgradeBtn = btn(canAfford ? "secondary" : "ghost", `${upgradeCost}$`);
+          upgradeBtn.classList.add("w-14", "text-right");
           if (canAfford) {
-            btn.addEventListener("click", () => {
+            upgradeBtn.addEventListener("click", () => {
               const err = this.state.upgradeBuilding(city.id, key);
-              if (!err) { this.onUpdate(city.id); this.render(); }
+              if (err) this.onError(err);
+              else { this.onUpdate(city.id); this.render(); }
             });
           } else {
-            btn.disabled = true;
+            upgradeBtn.disabled = true;
           }
-          rightGroup.appendChild(btn);
+          rightGroup.appendChild(upgradeBtn);
         }
       }
 
@@ -224,7 +217,7 @@ export class CityPanel {
       }
 
       if (city.owner === "player") {
-        const cancelBtn = el("button", "text-xs text-red-800 hover:text-red-500 transition-colors", "✕");
+        const cancelBtn = btn("danger", "✕");
         cancelBtn.addEventListener("click", () => {
           this.state.cancelProduction(city.id, idx);
           this.onUpdate(city.id);
@@ -274,13 +267,19 @@ export class CityPanel {
     const canAfford = credits >= bp.cost.credits;
     const card = el("div", "bg-gray-900 border border-gray-800 rounded p-2.5 mb-2");
 
-    // Name + cost row
-    const nameRow = el("div", "flex items-center justify-between mb-1.5");
-    nameRow.appendChild(el("span", "text-sm font-medium text-white", bp.name));
-    const costSpan = el("span", `text-xs font-mono ${canAfford ? "text-amber-400" : "text-gray-500"}`,
-      `${bp.cost.credits}$ · ${bp.cost.productionNeeded}⚙`
+    // Name + prereq + cost row
+    const nameRow = el("div", "flex items-start justify-between mb-1");
+    const nameCol = el("div", "flex flex-col");
+    nameCol.appendChild(el("span", "text-sm font-medium text-white", bp.name));
+    nameCol.appendChild(
+      el("span", "text-[10px] text-gray-600 leading-tight",
+        `Req: ${bp.requiredBuilding} lv${bp.requiredBuildingLevel}`)
     );
-    nameRow.appendChild(costSpan);
+    nameRow.appendChild(nameCol);
+    nameRow.appendChild(
+      el("span", `text-xs font-mono ${canAfford ? "text-amber-400" : "text-gray-500"}`,
+        `${bp.cost.credits}$ · ${bp.cost.productionNeeded}⚙`)
+    );
     card.appendChild(nameRow);
 
     // Stats row
@@ -303,24 +302,19 @@ export class CityPanel {
       card.appendChild(traitsRow);
     }
 
-    // Queue button
     if (isPlayer) {
-      const btn = el("button",
-        `w-full text-xs py-1 rounded transition-colors ` +
-        (canAfford
-          ? "bg-blue-700 hover:bg-blue-600 text-white cursor-pointer"
-          : "bg-gray-800 text-gray-600 cursor-not-allowed"),
-        canAfford ? "QUEUE UNIT" : `Need ${bp.cost.credits - credits}$ more`
-      );
+      const queueBtn = btn(canAfford ? "primary" : "ghost", canAfford ? "QUEUE UNIT" : `Need ${bp.cost.credits - credits}$ more`);
+      queueBtn.classList.add("w-full", "py-1");
       if (canAfford) {
-        btn.addEventListener("click", () => {
+        queueBtn.addEventListener("click", () => {
           const err = this.state.queueProduction(city.id, bp.id);
-          if (!err) { this.onUpdate(city.id); this.render(); }
+          if (err) this.onError(err);
+          else { this.onUpdate(city.id); this.render(); }
         });
       } else {
-        btn.disabled = true;
+        queueBtn.disabled = true;
       }
-      card.appendChild(btn);
+      card.appendChild(queueBtn);
     }
 
     return card;

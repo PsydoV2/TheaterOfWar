@@ -1,7 +1,6 @@
 import "./style.css";
 import { GameState } from "./engine/GameState";
 import { TurnResolver } from "./engine/TurnResolver";
-import type { TurnEvent } from "./engine/types";
 import type { Owner } from "./engine/types";
 import { getReachable, getAttackableTargets, findPath } from "./engine/Pathfinder";
 import { hexId, parseHexId, getHexesInRange } from "./engine/HexUtils";
@@ -12,6 +11,7 @@ import { HexRenderer } from "./renderer/HexRenderer";
 import { UnitRenderer } from "./renderer/UnitRenderer";
 import { InputManager } from "./renderer/InputManager";
 import { ModelLoader } from "./renderer/ModelLoader";
+import { hexToWorld } from "./renderer/constants";
 import { CityPanel } from "./ui/CityPanel";
 import { el } from "./ui/dom";
 
@@ -102,10 +102,11 @@ const cityPanel = new CityPanel(
 
 // ─── Selection State ──────────────────────────────────────────────────────────
 
-let selectedUnitId:     string | null = null;
-let currentReachable:   string[]      = [];
-let currentAttackable:  string[]      = [];
+let selectedUnitId:      string | null = null;
+let currentReachable:    string[]      = [];
+let currentAttackable:   string[]      = [];
 let pendingAttackTarget: string | null = null;
+let currentHoveredHex:   string | null = null;
 
 // ─── Fog of War ───────────────────────────────────────────────────────────────
 
@@ -161,6 +162,8 @@ function selectUnit(instanceId: string): void {
   currentAttackable = attackable;
   hexRenderer.setRangeHighlight(currentReachable, currentAttackable);
   unitRenderer.setSelected(instanceId);
+  updateUnitHud(currentHoveredHex);
+  updateHoverPanel(null);
 }
 
 function deselect(): void {
@@ -171,6 +174,8 @@ function deselect(): void {
   hexRenderer.clearRangeHighlight();
   hexRenderer.clearPathHighlight();
   unitRenderer.setSelected(null);
+  updateUnitHud(null);
+  updateHoverPanel(currentHoveredHex);
 }
 
 // ─── Combat ───────────────────────────────────────────────────────────────────
@@ -187,13 +192,14 @@ function performAttack(attackerId: string, defenderId: string): void {
   const attackerSurvived = !evt.aDestroyed;
   if (attackerSurvived) state.getUnit(attackerId)!.hasAttacked = true;
 
-  appendCombatLog(evt);
+  recordCombatEvent(evt);
   unitRenderer.syncWithState(state);
 
   if (!evt.aDestroyed && evt.aDamage > 0) unitRenderer.shakeUnit(attackerId);
   if (!evt.bDestroyed && evt.bDamage > 0) unitRenderer.shakeUnit(defenderId);
 
   updateMinimap();
+  updateIdleUnits();
 
   if (attackerSurvived) selectUnit(attackerId);
   else deselect();
@@ -220,6 +226,13 @@ function showToast(message: string, type: "error" | "success" | "info" = "info")
   }, 2800);
 }
 
+// ─── Combat event (stats + toasts) ───────────────────────────────────────────
+
+function recordCombatEvent(evt: CombatEvent): void {
+  if (evt.bDestroyed) { stats.playerKills++;  showToast(`${evt.bName} destroyed!`, "success"); }
+  if (evt.aDestroyed) { stats.playerLosses++; showToast(`${evt.aName} lost!`, "error"); }
+}
+
 // ─── Minimap ──────────────────────────────────────────────────────────────────
 
 const MM_W = 160, MM_H = 130;
@@ -232,8 +245,19 @@ minimapCanvas.style.cssText =
   `position:fixed;top:58px;right:4px;z-index:40;` +
   `width:${MM_W}px;height:${MM_H}px;` +
   `border:1px solid #374151;border-radius:4px;` +
-  `pointer-events:none;opacity:0.9;`;
+  `opacity:0.9;cursor:crosshair;`;
 document.body.appendChild(minimapCanvas);
+
+minimapCanvas.addEventListener("click", (e: MouseEvent) => {
+  const rect = minimapCanvas.getBoundingClientRect();
+  const px = (e.clientX - rect.left) * (MM_W / rect.width);
+  const py = (e.clientY - rect.top)  * (MM_H / rect.height);
+  const r_approx = (py - MM_CY) / (0.866 * MM_SCALE);
+  const q_approx = (px - MM_CX) / MM_SCALE - r_approx * 0.5;
+  const { x, z } = hexToWorld(q_approx, r_approx);
+  sceneManager.controls.target.set(x, 0, z);
+  sceneManager.controls.update();
+});
 
 function updateMinimap(): void {
   const ctx = minimapCanvas.getContext("2d");
@@ -282,7 +306,6 @@ function updateMinimap(): void {
     }
   }
 
-  // Selected unit indicator
   if (selectedUnitId) {
     const unit = state.getUnit(selectedUnitId);
     if (unit) {
@@ -306,6 +329,7 @@ const overlay = el("div", "fixed inset-0 pointer-events-none");
 document.body.appendChild(overlay);
 
 // ── Top bar ───────────────────────────────────────────────────────────────────
+
 const topBar = el("div",
   "absolute top-0 left-0 right-0 flex items-center justify-between pl-5 pr-[22rem] py-3 " +
   "bg-gradient-to-b from-black/80 to-transparent pointer-events-none"
@@ -328,6 +352,7 @@ topBar.appendChild(resourceBar);
 overlay.appendChild(topBar);
 
 // ─── End Turn HUD ─────────────────────────────────────────────────────────────
+
 const endTurnHud = el("div",
   "fixed bottom-7 left-1/2 -translate-x-1/2 z-[200] pointer-events-auto " +
   "flex flex-col items-center gap-1.5"
@@ -348,33 +373,52 @@ const btnEndTurn = el("button",
   "END TURN"
 );
 
+const idleUnitsIndicator = el("button",
+  "text-amber-400 text-[10px] font-mono uppercase tracking-wider " +
+  "hover:text-amber-300 transition-colors select-none cursor-pointer " +
+  "bg-transparent border-0 p-0"
+);
+idleUnitsIndicator.style.display = "none";
+
+let idleCycleIdx = 0;
+idleUnitsIndicator.addEventListener("click", () => {
+  const idle = state.getUnitsBy("player").filter(u => u.movementLeft > 0 || !u.hasAttacked);
+  if (idle.length === 0) return;
+  idleCycleIdx = idleCycleIdx % idle.length;
+  const unit = idle[idleCycleIdx]!;
+  idleCycleIdx++;
+  const cell = state.getHexById(unit.hexId);
+  if (cell) {
+    const { x, z } = hexToWorld(cell.q, cell.r);
+    sceneManager.controls.target.set(x, 0, z);
+    sceneManager.controls.update();
+  }
+  selectUnit(unit.instanceId);
+});
+
 endTurnHud.appendChild(turnLabel);
 endTurnHud.appendChild(btnEndTurn);
+endTurnHud.appendChild(idleUnitsIndicator);
 document.body.appendChild(endTurnHud);
 
-// Hover/selection info panel (bottom-left)
+// ─── Left panel: hover info (no selection) ───────────────────────────────────
+
 const hoverPanel = el("div",
-  "absolute bottom-4 left-4 bg-black/75 border border-gray-700 rounded p-3 " +
-  "text-xs font-mono text-gray-300 min-w-48 transition-opacity duration-150"
+  "fixed bottom-4 left-4 w-60 bg-black/75 border border-gray-700 rounded-lg p-3 " +
+  "text-xs font-mono text-gray-300 pointer-events-none transition-opacity duration-150"
 );
 hoverPanel.style.opacity = "0";
-overlay.appendChild(hoverPanel);
+document.body.appendChild(hoverPanel);
 
-// Event log (bottom-right)
-const logPanel = el("div",
-  "absolute bottom-4 right-4 w-96 max-h-64 overflow-y-auto " +
-  "bg-black/70 border border-gray-800 rounded p-3 text-xs font-mono space-y-0.5 " +
-  "pointer-events-auto"
-);
-overlay.appendChild(logPanel);
+// ─── Left panel: unit HUD (unit selected) ────────────────────────────────────
 
-// Control hint
-overlay.appendChild(
-  el("div",
-    "absolute top-14 left-5 text-gray-600 text-xs font-mono pointer-events-none",
-    "Click city → manage  ·  Click unit → move/attack  ·  Drag → pan  ·  Scroll → zoom"
-  )
+const unitHud = el("div",
+  "fixed bottom-4 left-4 w-60 bg-black/85 border border-gray-700 rounded-lg " +
+  "text-xs font-mono text-gray-300 overflow-hidden transition-opacity duration-150 pointer-events-auto"
 );
+unitHud.style.opacity = "0";
+unitHud.style.pointerEvents = "none";
+document.body.appendChild(unitHud);
 
 // ─── UI Update Helpers ────────────────────────────────────────────────────────
 
@@ -382,17 +426,6 @@ function ownerColor(owner: Owner | "world"): string {
   if (owner === "player") return "text-blue-400";
   if (owner === "enemy")  return "text-red-400";
   return "text-gray-400";
-}
-
-function catIcon(cat: TurnEvent["category"]): string {
-  switch (cat) {
-    case "income":     return "💰";
-    case "production": return "⚙️";
-    case "turret":     return "🛡️";
-    case "combat":     return "⚔️";
-    case "ai":         return "🤖";
-    case "system":     return "🔔";
-  }
 }
 
 function updateResources(): void {
@@ -408,46 +441,214 @@ function updateResources(): void {
   productionEl.textContent = `⚙️ ${prodPerTurn}/turn`;
   unitsEl.textContent      = `🪖 ${unitCount} units`;
   turnLabel.textContent    = `Turn ${state.turn}`;
+
+  updateIdleUnits();
 }
 
-const logSections: HTMLElement[][] = [];
-
-function appendLog(events: TurnEvent[], turnNum: number): void {
-  const section: HTMLElement[] = [];
-
-  const header = el("div", "border-t border-gray-800 pt-1 mt-1 text-gray-500 uppercase tracking-widest", `── T${turnNum} ──`);
-  logPanel.appendChild(header);
-  section.push(header);
-
-  for (const ev of events) {
-    const row = el("div", `flex gap-1.5 ${ownerColor(ev.owner)}`);
-    row.appendChild(document.createTextNode(catIcon(ev.category) + " " + ev.message));
-    logPanel.appendChild(row);
-    section.push(row);
+function updateIdleUnits(): void {
+  const idle = state.getUnitsBy("player").filter(u => u.movementLeft > 0 || !u.hasAttacked);
+  if (idle.length === 0) {
+    idleUnitsIndicator.style.display = "none";
+    idleCycleIdx = 0;
+  } else {
+    idleUnitsIndicator.style.display = "block";
+    idleUnitsIndicator.textContent = `▸ ${idle.length} unit${idle.length !== 1 ? "s" : ""} not yet acted`;
   }
-
-  logSections.push(section);
-  // Keep last 20 turns in log
-  if (logSections.length > 20) {
-    for (const node of logSections.shift()!) node.remove();
-  }
-
-  logPanel.scrollTop = logPanel.scrollHeight;
 }
 
-function appendCombatLog(evt: CombatEvent): void {
-  if (evt.bDestroyed) stats.playerKills++;
-  if (evt.aDestroyed) stats.playerLosses++;
+// ─── Unit HUD ─────────────────────────────────────────────────────────────────
 
-  const row  = el("div", "flex gap-1.5 text-orange-400");
-  const line =
-    `⚔️ ${evt.aName} vs ${evt.bName}: ` +
-    `-${evt.aDamage}HP / -${evt.bDamage}HP` +
-    (evt.bDestroyed ? "  [enemy destroyed]" : "") +
-    (evt.aDestroyed ? "  [unit lost!]" : "");
-  row.appendChild(document.createTextNode(line));
-  logPanel.appendChild(row);
-  logPanel.scrollTop = logPanel.scrollHeight;
+function updateUnitHud(hoveredHexId: string | null): void {
+  if (!selectedUnitId) {
+    unitHud.style.opacity = "0";
+    unitHud.style.pointerEvents = "none";
+    return;
+  }
+
+  const unit = state.getUnit(selectedUnitId);
+  const bp   = unit ? state.getBlueprint(unit.blueprintId) : null;
+  if (!unit || !bp) return;
+
+  unitHud.replaceChildren();
+
+  // ── Static unit section ─────────────────────────────────────────────────
+  const staticSection = el("div", "p-3");
+
+  const nameRow = el("div", "flex items-center justify-between mb-2.5");
+  const nameText = bp.name + (unit.stackSize > 1 ? ` ×${unit.stackSize}` : "");
+  nameRow.appendChild(el("span", "text-white font-bold text-sm", nameText));
+  const deselectBtn = el("button",
+    "text-gray-600 hover:text-gray-300 text-[10px] px-1.5 py-0.5 border border-gray-700 " +
+    "hover:border-gray-500 rounded transition-colors cursor-pointer font-mono",
+    "ESC"
+  );
+  deselectBtn.addEventListener("click", () => deselect());
+  nameRow.appendChild(deselectBtn);
+  staticSection.appendChild(nameRow);
+
+  // HP bar
+  const hpPct = unit.hp / bp.maxHp;
+  const hpBarColor  = hpPct > 0.6 ? "bg-green-500"  : hpPct > 0.3 ? "bg-yellow-500"  : "bg-red-500";
+  const hpTextColor = hpPct > 0.6 ? "text-green-400" : hpPct > 0.3 ? "text-yellow-400" : "text-red-400";
+  const hpWrapper = el("div", "mb-3");
+  const hpLabelRow = el("div", "flex justify-between mb-1");
+  hpLabelRow.appendChild(el("span", "text-gray-500", "HP"));
+  hpLabelRow.appendChild(el("span", hpTextColor, `${unit.hp} / ${bp.maxHp}`));
+  hpWrapper.appendChild(hpLabelRow);
+  const hpTrack = el("div", "h-1.5 bg-gray-800 rounded-full overflow-hidden");
+  const hpFill  = el("div", `h-full ${hpBarColor} rounded-full`);
+  hpFill.style.width = `${hpPct * 100}%`;
+  hpTrack.appendChild(hpFill);
+  hpWrapper.appendChild(hpTrack);
+  staticSection.appendChild(hpWrapper);
+
+  // Move pips + Attack badge
+  const statusRow = el("div", "flex gap-5 items-start");
+
+  const moveGroup = el("div", "");
+  moveGroup.appendChild(el("div", "text-gray-500 text-[10px] uppercase tracking-wider mb-1.5", "Move"));
+  const movePips = el("div", "flex gap-0.5");
+  for (let i = 0; i < bp.movement.range; i++) {
+    movePips.appendChild(el("div",
+      `w-2 h-2 rounded-sm ${i < unit.movementLeft ? "bg-cyan-400" : "bg-gray-700"}`
+    ));
+  }
+  moveGroup.appendChild(movePips);
+  statusRow.appendChild(moveGroup);
+
+  const atkGroup = el("div", "");
+  atkGroup.appendChild(el("div", "text-gray-500 text-[10px] uppercase tracking-wider mb-1.5", "Attack"));
+  atkGroup.appendChild(el("div",
+    `text-[11px] font-bold ${unit.hasAttacked ? "text-gray-600" : "text-red-400"}`,
+    unit.hasAttacked ? "SPENT" : "READY"
+  ));
+  statusRow.appendChild(atkGroup);
+
+  staticSection.appendChild(statusRow);
+  unitHud.appendChild(staticSection);
+
+  // ── Hover context section ───────────────────────────────────────────────
+  if (hoveredHexId) {
+    const cell    = state.getHexById(hoveredHexId);
+    const hovUnit = cell?.unitId ? state.getUnit(cell.unitId) : null;
+
+    if (currentAttackable.includes(hoveredHexId) && hovUnit && hovUnit.owner !== "player") {
+      const preview = previewCombat(selectedUnitId, hovUnit.instanceId, state);
+      if (preview) {
+        unitHud.appendChild(el("div", "border-t border-gray-800"));
+        const pvSection = el("div", "p-3 space-y-1");
+        pvSection.appendChild(el("div", "text-gray-500 text-[10px] uppercase tracking-wider mb-0.5", "Combat Preview"));
+        pvSection.appendChild(
+          el("div", preview.defenderDestroyed ? "text-green-400" : "text-emerald-400",
+            `→ Deal ${preview.attackerDeals}  (${preview.defenderHpAfter}HP left)`)
+        );
+        if (preview.defenderDestroyed)
+          pvSection.appendChild(el("div", "text-green-300 font-bold", "✓ Enemy destroyed"));
+        if (preview.defenderCounters > 0) {
+          pvSection.appendChild(
+            el("div", preview.attackerDestroyed ? "text-red-500 font-bold" : "text-orange-400",
+              `← Counter ${preview.defenderCounters}  (you: ${preview.attackerHpAfter}HP)`)
+          );
+        }
+        if (preview.attackerDestroyed)
+          pvSection.appendChild(el("div", "text-red-400 font-bold", "⚠ You will be destroyed!"));
+
+        pvSection.appendChild(el("div",
+          `mt-1 font-bold ${pendingAttackTarget === hovUnit.instanceId ? "text-red-400" : "text-orange-400"}`,
+          pendingAttackTarget === hovUnit.instanceId ? "⚔ Click again to confirm" : "⚔ Click to attack"
+        ));
+        unitHud.appendChild(pvSection);
+      }
+    } else if (currentReachable.includes(hoveredHexId) && !cell?.unitId) {
+      unitHud.appendChild(el("div", "border-t border-gray-800"));
+      const moveSection = el("div", "p-3");
+      moveSection.appendChild(el("div", "text-cyan-300 font-bold", "→ Click to move here"));
+      unitHud.appendChild(moveSection);
+    }
+  }
+
+  unitHud.style.opacity = "1";
+  unitHud.style.pointerEvents = "auto";
+}
+
+// ─── Hover Panel (no selection) ───────────────────────────────────────────────
+
+function updateHoverPanel(hId: string | null): void {
+  if (selectedUnitId) { hoverPanel.style.opacity = "0"; return; }
+  if (!hId)           { hoverPanel.style.opacity = "0"; return; }
+
+  const cell = state.getHexById(hId);
+  if (!cell) return;
+
+  hoverPanel.replaceChildren();
+
+  // Terrain line
+  const terrainRow = el("div", "flex justify-between");
+  terrainRow.appendChild(el("span", "text-gray-300 capitalize", cell.terrain));
+  terrainRow.appendChild(el("span", "text-gray-600", `${cell.q}, ${cell.r}`));
+  hoverPanel.appendChild(terrainRow);
+
+  // City section
+  if (cell.cityId) {
+    const city = state.getCity(cell.cityId);
+    if (city) {
+      hoverPanel.appendChild(el("div", "border-t border-gray-800 mt-1.5 pt-1.5"));
+      hoverPanel.appendChild(el("div", "font-bold text-white", city.name));
+      const ownerLine = el("div", "mt-0.5");
+      ownerLine.appendChild(document.createTextNode("Owner: "));
+      ownerLine.appendChild(el("span", ownerColor(city.owner), city.owner.toUpperCase()));
+      hoverPanel.appendChild(ownerLine);
+
+      if (city.owner !== "neutral") {
+        const income = 30 + city.buildings.marketLevel * 25;
+        const prod   = city.buildings.factoryLevel * 50;
+        hoverPanel.appendChild(el("div", "text-yellow-600 mt-0.5 text-[10px]",
+          `+${income}$/turn${prod > 0 ? `  ⚙+${prod}/turn` : ""}`));
+      }
+
+      const q = city.productionQueue[0];
+      if (q) {
+        const bpQ = state.getBlueprint(q.blueprintId);
+        if (bpQ) {
+          const pct = Math.round((q.progressPoints / bpQ.cost.productionNeeded) * 100);
+          hoverPanel.appendChild(el("div", "text-yellow-400 mt-0.5", `⚙ ${bpQ.name} — ${pct}%`));
+        }
+      }
+
+      if (city.owner === "player")
+        hoverPanel.appendChild(el("div", "text-blue-400 mt-1.5 text-[10px]", "↵ Click to manage"));
+    }
+  }
+
+  // Unit section (for scouting enemy/own units when nothing selected)
+  const hovUnit = cell.unitId ? state.getUnit(cell.unitId) : null;
+  if (hovUnit) {
+    const bp = state.getBlueprint(hovUnit.blueprintId);
+    const stackLabel = hovUnit.stackSize > 1 ? ` ×${hovUnit.stackSize}` : "";
+    hoverPanel.appendChild(el("div", "border-t border-gray-800 mt-1.5 pt-1.5"));
+    hoverPanel.appendChild(el("div", "font-bold text-white",
+      (bp?.name ?? hovUnit.blueprintId) + stackLabel));
+    hoverPanel.appendChild(el("div", `${ownerColor(hovUnit.owner)} mt-0.5`,
+      `${hovUnit.owner.toUpperCase()} — ${hovUnit.hp}/${bp?.maxHp ?? "?"}HP`));
+
+    if (bp) {
+      const statsRow = el("div", "flex gap-2 mt-1 text-gray-500");
+      statsRow.appendChild(el("span", "", `⚔ ${bp.combat.damageVsLand}`));
+      if (bp.combat.damageVsAir > 0) statsRow.appendChild(el("span", "", `✈ ${bp.combat.damageVsAir}`));
+      if (bp.combat.damageVsSea > 0) statsRow.appendChild(el("span", "", `⚓ ${bp.combat.damageVsSea}`));
+      statsRow.appendChild(el("span", "ml-auto", `Mv ${bp.movement.range}`));
+      hoverPanel.appendChild(statsRow);
+    }
+
+    if (hovUnit.owner === "player") {
+      if (hovUnit.movementLeft === 0 && hovUnit.hasAttacked)
+        hoverPanel.appendChild(el("div", "text-gray-600 mt-1 text-[10px] italic", "Spent this turn"));
+      else
+        hoverPanel.appendChild(el("div", "text-cyan-400 mt-1 text-[10px]", "↵ Click to select"));
+    }
+  }
+
+  hoverPanel.style.opacity = "1";
 }
 
 function showEndScreen(outcome: "victory" | "defeat"): void {
@@ -462,7 +663,6 @@ function showEndScreen(outcome: "victory" | "defeat"): void {
     : "All allied cities have fallen.";
   screen.appendChild(el("div", "mt-4 text-gray-400 text-sm font-mono", sub));
 
-  // Stats row
   const statsLine =
     `Turn ${state.turn - 1}  ·  ${stats.playerKills} enemies destroyed  ·  ` +
     `${stats.playerLosses} units lost  ·  ${stats.citiesCaptured} cities captured`;
@@ -526,126 +726,6 @@ function showTurnBanner(turn: number): void {
   });
 }
 
-// ─── Hover panel ──────────────────────────────────────────────────────────────
-
-function updateHoverPanel(hId: string | null): void {
-  if (!hId) { hoverPanel.style.opacity = "0"; return; }
-  const cell = state.getHexById(hId);
-  if (!cell) return;
-
-  const hoveredUnit = cell.unitId ? state.getUnit(cell.unitId) : undefined;
-
-  hoverPanel.replaceChildren();
-  hoverPanel.appendChild(el("div", "text-gray-500 mb-1", `Hex (${cell.q}, ${cell.r})`));
-  hoverPanel.appendChild(el("div", "text-white capitalize", `Terrain: ${cell.terrain}`));
-
-  if (cell.cityId) {
-    const city = state.getCity(cell.cityId);
-    if (city) {
-      hoverPanel.appendChild(el("div", "mt-1 text-gray-600", "───"));
-      hoverPanel.appendChild(el("div", "font-bold text-white", city.name));
-      const ol = el("div", "");
-      ol.appendChild(document.createTextNode("Owner: "));
-      ol.appendChild(el("span", ownerColor(city.owner), city.owner.toUpperCase()));
-      hoverPanel.appendChild(ol);
-
-      if (city.owner !== "neutral") {
-        hoverPanel.appendChild(
-          el("div", "text-xs text-yellow-600 mt-0.5", `+30$/turn  ⚙️+${city.buildings.factoryLevel * 50}/turn`)
-        );
-      }
-
-      const q = city.productionQueue[0];
-      if (q) {
-        const bp = state.getBlueprint(q.blueprintId);
-        if (bp) {
-          const pct = Math.round((q.progressPoints / bp.cost.productionNeeded) * 100);
-          hoverPanel.appendChild(
-            el("div", "text-yellow-400 mt-0.5",
-              `⚙️ ${bp.name} — ${pct}% (${q.progressPoints}/${bp.cost.productionNeeded}pt)`)
-          );
-        }
-      }
-      if (city.owner === "player")
-        hoverPanel.appendChild(el("div", "mt-1.5 text-blue-500", "↵ Click to manage"));
-    }
-  }
-
-  if (hoveredUnit) {
-    const bp = state.getBlueprint(hoveredUnit.blueprintId);
-    const stackLabel = hoveredUnit.stackSize > 1 ? ` ×${hoveredUnit.stackSize}` : "";
-    hoverPanel.appendChild(el("div", "mt-1 text-gray-600", "───"));
-    hoverPanel.appendChild(el("div", "font-bold text-white", (bp?.name ?? hoveredUnit.blueprintId) + stackLabel));
-    hoverPanel.appendChild(
-      el("div", ownerColor(hoveredUnit.owner), `${hoveredUnit.owner.toUpperCase()} — ${hoveredUnit.hp}/${bp?.maxHp ?? "?"}HP`)
-    );
-
-    if (bp) {
-      const statsRow = el("div", "flex gap-2 mt-1 text-xs text-gray-500");
-      statsRow.appendChild(el("span", "", `🗡 ${bp.combat.damageVsLand}`));
-      if (bp.combat.damageVsAir > 0) statsRow.appendChild(el("span", "", `✈ ${bp.combat.damageVsAir}`));
-      if (bp.combat.damageVsSea > 0) statsRow.appendChild(el("span", "", `⚓ ${bp.combat.damageVsSea}`));
-      statsRow.appendChild(el("span", "ml-auto", `Rng ${bp.combat.range}`));
-      statsRow.appendChild(el("span", "", `Mv ${bp.movement.range}`));
-      hoverPanel.appendChild(statsRow);
-    }
-
-    if (hoveredUnit.owner === "player") {
-      const noMoves = hoveredUnit.movementLeft === 0;
-      if (noMoves && hoveredUnit.hasAttacked)
-        hoverPanel.appendChild(el("div", "mt-1 text-gray-500 italic", "Spent this turn"));
-      else if (noMoves)
-        hoverPanel.appendChild(el("div", "mt-1 text-yellow-600", "Moved — can still attack"));
-      else if (hoveredUnit.hasAttacked)
-        hoverPanel.appendChild(el("div", "mt-1 text-yellow-600", "Attacked — can still move"));
-      else if (hoveredUnit.hasMoved) {
-        const mv = hoveredUnit.movementLeft;
-        hoverPanel.appendChild(el("div", "mt-1 text-cyan-400", `↵ Select — ${mv} move${mv === 1 ? "" : "s"} left`));
-      } else
-        hoverPanel.appendChild(el("div", "mt-1 text-cyan-400", "↵ Click to select & move"));
-    }
-
-    if (selectedUnitId === hoveredUnit.instanceId)
-      hoverPanel.appendChild(el("div", "mt-1 text-yellow-400 font-bold", "● SELECTED"));
-  }
-
-  if (selectedUnitId && currentReachable.includes(hId) && !cell.unitId)
-    hoverPanel.appendChild(el("div", "mt-1.5 text-cyan-300 font-bold", "→ Click to move here"));
-
-  // ── Attack section: damage preview + confirmation ─────────────────────────
-  if (selectedUnitId && currentAttackable.includes(hId) && hoveredUnit && hoveredUnit.owner !== "player") {
-    const preview = previewCombat(selectedUnitId, hoveredUnit.instanceId, state);
-    if (preview) {
-      const pvBox = el("div", "mt-2 bg-gray-900/80 border border-gray-700 rounded p-1.5 text-xs space-y-0.5");
-      pvBox.appendChild(el("div", "text-gray-500 uppercase tracking-wider text-[10px] mb-1", "Combat Preview"));
-      pvBox.appendChild(
-        el("div", `${preview.defenderDestroyed ? "text-green-400" : "text-emerald-400"}`,
-          `→ Deal ${preview.attackerDeals} dmg  (enemy: ${preview.defenderHpAfter}HP left)`)
-      );
-      if (preview.defenderDestroyed)
-        pvBox.appendChild(el("div", "text-green-300 font-bold", "✓ Enemy destroyed!"));
-      if (preview.defenderCounters > 0) {
-        pvBox.appendChild(
-          el("div", `${preview.attackerDestroyed ? "text-red-500 font-bold" : "text-orange-400"}`,
-            `← Counter ${preview.defenderCounters} dmg  (you: ${preview.attackerHpAfter}HP left)`)
-        );
-      }
-      if (preview.attackerDestroyed)
-        pvBox.appendChild(el("div", "text-red-400 font-bold", "⚠ You will be destroyed!"));
-      hoverPanel.appendChild(pvBox);
-    }
-
-    if (pendingAttackTarget === hoveredUnit.instanceId) {
-      hoverPanel.appendChild(el("div", "mt-1.5 text-red-400 font-bold", "⚔ CONFIRM? Click again to attack"));
-      hoverPanel.appendChild(el("div", "text-gray-600 text-[10px]", "Esc to cancel"));
-    } else {
-      hoverPanel.appendChild(el("div", "mt-1.5 text-orange-400 font-bold", "⚔ Click to initiate attack"));
-    }
-  }
-
-  hoverPanel.style.opacity = "1";
-}
-
 // ─── Input ────────────────────────────────────────────────────────────────────
 
 new InputManager(
@@ -653,8 +733,10 @@ new InputManager(
   sceneManager.camera,
   hexRenderer,
   (hId) => {
+    currentHoveredHex = hId;
     hexRenderer.setHovered(hId);
     updateHoverPanel(hId);
+    updateUnitHud(hId);
 
     if (selectedUnitId && hId && currentReachable.includes(hId)) {
       const unit = state.getUnit(selectedUnitId);
@@ -679,13 +761,12 @@ new InputManager(
       if (!unit) return;
 
       if (selectedUnitId && currentAttackable.includes(hId) && unit.owner !== "player") {
-        // Two-click attack confirmation
         if (pendingAttackTarget === unit.instanceId) {
           pendingAttackTarget = null;
           performAttack(selectedUnitId, unit.instanceId);
         } else {
           pendingAttackTarget = unit.instanceId;
-          updateHoverPanel(hId);
+          updateUnitHud(hId);
         }
         return;
       }
@@ -760,10 +841,11 @@ new InputManager(
       state.moveUnit(movedId, hId, movementCost);
 
       hexRenderer.clearRangeHighlight();
+      hexRenderer.clearPathHighlight();
       unitRenderer.setSelected(null);
-      selectedUnitId    = null;
-      currentReachable  = [];
-      currentAttackable = [];
+      selectedUnitId      = null;
+      currentReachable    = [];
+      currentAttackable   = [];
       pendingAttackTarget = null;
 
       const destCell = state.getHexById(hId);
@@ -773,6 +855,7 @@ new InputManager(
           state.captureCity(destCell.cityId, "player");
           hexRenderer.updateCityMarker(hId, "player");
           stats.citiesCaptured++;
+          showToast(`${city.name} captured!`, "success");
           updateResources();
         }
       }
@@ -808,6 +891,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !btnEndTurn.disabled) {
     btnEndTurn.click();
   }
+  // Tab: cycle through idle units
+  if (e.key === "Tab") {
+    e.preventDefault();
+    idleUnitsIndicator.click();
+  }
 });
 
 // ─── End Turn ─────────────────────────────────────────────────────────────────
@@ -820,7 +908,6 @@ btnEndTurn.addEventListener("click", async () => {
 
   const result = resolver.resolve();
 
-  appendLog(result.events, result.turn);
   updateResources();
   hexRenderer.syncCityOwners(state);
   unitRenderer.syncWithState(state);
